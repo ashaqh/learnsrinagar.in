@@ -81,14 +81,13 @@ export async function loader({ request }) {
   if (user.role_name === 'teacher') {
     whereConditions.push('h.teacher_id = ?')
     queryParams.push(user.id)
+  } else if (user.role_name === 'school_admin' || user.role_name === 'super_admin') {
+    // School admin and super admin see all homework — no filter needed
   } else if (user.class_ids && user.class_ids.length > 0) {
     whereConditions.push(
       `s.class_id IN (${user.class_ids.map(() => '?').join(',')})`
     )
     queryParams.push(...user.class_ids)
-  } else if (user.school_id) {
-    whereConditions.push('c.school_id = ?')
-    queryParams.push(user.school_id)
   }
 
   if (whereConditions.length > 0) {
@@ -97,7 +96,7 @@ export async function loader({ request }) {
 
   homeworkQuery += ` ORDER BY h.created_at DESC`
 
-  const [homework] = await query(homeworkQuery, queryParams)
+  const homework = await query(homeworkQuery, queryParams)
 
   let subjectsQuery = `
     SELECT s.id, s.name, c.name AS class_name 
@@ -117,14 +116,13 @@ export async function loader({ request }) {
       )
     `)
     subjectParams.push(user.id)
+  } else if (user.role_name === 'school_admin' || user.role_name === 'super_admin') {
+    // School admin and super admin see all subjects — no filter needed
   } else if (user.class_ids && user.class_ids.length > 0) {
     subjectConditions.push(
       `s.class_id IN (${user.class_ids.map(() => '?').join(',')})`
     )
     subjectParams.push(...user.class_ids)
-  } else if (user.school_id) {
-    subjectConditions.push('c.school_id = ?')
-    subjectParams.push(user.school_id)
   }
 
   if (subjectConditions.length > 0) {
@@ -133,7 +131,7 @@ export async function loader({ request }) {
 
   subjectsQuery += ` ORDER BY c.name, s.name`
 
-  const [subjects] = await query(subjectsQuery, subjectParams)
+  const subjects = await query(subjectsQuery, subjectParams)
 
   return { user, homework, subjects }
 }
@@ -365,7 +363,7 @@ export default function Homework() {
   return (
     <div className='container mx-auto px-4 pb-10'>
       <div className='flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6'>
-        <h1 className='text-xl font-semibold'>Manage Homework</h1>
+        <h1 className='text-xl font-semibold'>{isTeacher ? 'Manage Homework' : 'Homework'}</h1>
         {isTeacher && (
           <Button onClick={handleCreateHomework} className='w-full sm:w-auto'>
             <PlusIcon className='mr-2 h-4 w-4' />
@@ -394,18 +392,24 @@ export default function Homework() {
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className='text-center'>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+              table.getRowModel().rows.map((row, rowIndex) => {
+                const isLatest = rowIndex === 0 && table.getState().pagination.pageIndex === 0;
+                return (
+                  <TableRow
+                    key={row.id}
+                    className={isLatest ? 'bg-purple-50 border-l-4 border-l-purple-500 font-medium' : ''}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className='text-center'>
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell

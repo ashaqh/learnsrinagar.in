@@ -1,6 +1,9 @@
 import { createCookieSessionStorage, redirect } from "@remix-run/node";
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { query } from './db';
+
+const JWT_SECRET = process.env.SESSION_SECRET || "s3cret";
 
 const sessionStorage = createCookieSessionStorage({
     cookie: {
@@ -43,6 +46,18 @@ export async function getUser(request) {
     const session = await sessionStorage.getSession(request.headers.get("Cookie"));
     const user = session.get('user');
     return user;
+}
+
+export function generateToken(user) {
+    return jwt.sign(user, JWT_SECRET, { expiresIn: '7d' });
+}
+
+export function verifyToken(token) {
+    try {
+        return jwt.verify(token, JWT_SECRET);
+    } catch (e) {
+        return null;
+    }
 }
 
 export async function verifyLogin(email, password) {

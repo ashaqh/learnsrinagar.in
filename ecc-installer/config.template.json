@@ -1,0 +1,4 @@
+{
+  "mode": "multi-agent",
+  "agents": ["planner", "architect", "developer", "reviewer"]
+}

@@ -106,7 +106,7 @@ export async function loader({ request }) {
     studentsQuery += ` AND ${whereConditions.join(' AND ')}`
   }
 
-  const [students] = await query(studentsQuery, queryParams)
+  const students = await query(studentsQuery, queryParams)
 
   // Get all classes or filter by user's class_ids if they exist
   let classesQuery = `SELECT id, name FROM classes`
@@ -117,7 +117,7 @@ export async function loader({ request }) {
     classQueryParams.push(...user.class_ids)
   }
 
-  const [classes] = await query(classesQuery, classQueryParams)
+  const classes = await query(classesQuery, classQueryParams)
 
   // Get all schools or filter by user's school_id if they have one
   let schoolsQuery = `SELECT id, name FROM schools`
@@ -128,7 +128,7 @@ export async function loader({ request }) {
     schoolQueryParams.push(user.school_id)
   }
 
-  const [schools] = await query(schoolsQuery, schoolQueryParams)
+  const schools = await query(schoolsQuery, schoolQueryParams)
 
   return { user, students, classes, schools }
 }
@@ -149,7 +149,7 @@ export async function action({ request }) {
       // Always use the user's school_id
       const schools_id = user.school_id
 
-      const [dupEmail] = await query('SELECT id FROM users WHERE email = ?', [
+      const dupEmail = await query('SELECT id FROM users WHERE email = ?', [
         email,
       ])
       if (dupEmail.length > 0) {
@@ -160,7 +160,7 @@ export async function action({ request }) {
         }
       }
 
-      const [dupEnroll] = await query(
+      const dupEnroll = await query(
         'SELECT id FROM student_profiles WHERE enrollment_no = ?',
         [enrollment_no]
       )
@@ -177,7 +177,7 @@ export async function action({ request }) {
 
       // Use query function instead of getConnection
       // Insert the user
-      const [userRes] = await query(
+      const userRes = await query(
         `INSERT INTO users
          (name, email, password_hash, role_id)
          VALUES (?, ?, ?, 5)`,
@@ -210,7 +210,7 @@ export async function action({ request }) {
       // Always use the user's school_id
       const schools_id = user.school_id
 
-      const [dupEmail] = await query(
+      const dupEmail = await query(
         'SELECT id FROM users WHERE email = ? AND id != ?',
         [email, id]
       )
@@ -222,7 +222,7 @@ export async function action({ request }) {
         }
       }
 
-      const [dupEnroll] = await query(
+      const dupEnroll = await query(
         'SELECT id FROM student_profiles WHERE enrollment_no = ? AND id != ?',
         [enrollment_no, profile_id]
       )

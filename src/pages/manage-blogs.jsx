@@ -17,7 +17,7 @@ import { getUser } from '@/lib/auth'
 
 export async function loader({ request }) {
   const user = await getUser(request)
-  if (!user || user.role_name !== 'super_admin') {
+  if (!user || (user.role_name !== 'super_admin' && user.role_name !== 'school_admin')) {
     throw new Response('Unauthorized', { status: 403 })
   }
 
@@ -38,10 +38,22 @@ export async function loader({ request }) {
     // Fetch categories
     const categories = await db.query('SELECT * FROM blog_categories ORDER BY name')
     
+    // Transform blob buffers to base64 strings
+    const transformedBlogs = blogs.map(blog => {
+      const transformed = { ...blog }
+      if (blog.thumbnail_image instanceof Buffer) {
+        transformed.thumbnail_image = `data:image/jpeg;base64,${blog.thumbnail_image.toString('base64')}`
+      }
+      if (blog.cover_image instanceof Buffer) {
+        transformed.cover_image = `data:image/jpeg;base64,${blog.cover_image.toString('base64')}`
+      }
+      return transformed
+    })
+
     console.log('Loaded blogs:', blogs.length)
     console.log('Loaded categories:', categories.length)
 
-    return new Response(JSON.stringify({ blogs, categories, user }), {
+    return new Response(JSON.stringify({ blogs: transformedBlogs, categories, user }), {
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
@@ -62,7 +74,7 @@ export async function loader({ request }) {
 
 export async function action({ request }) {
   const user = await getUser(request)
-  if (!user || user.role_name !== 'super_admin') {
+  if (!user || (user.role_name !== 'super_admin' && user.role_name !== 'school_admin')) {
     throw new Response('Unauthorized', { status: 403 })
   }
 
@@ -109,6 +121,23 @@ export async function action({ request }) {
           blogData.cover_image,
           blogData.publish_date
         ])
+
+        try {
+          const { notificationService } = await import("@/services/notificationService.server");
+          const { getBlogNotification } = await import("@/services/notificationHelper.server");
+          const message = await getBlogNotification(blogData.title, blogData.category_id, user.id);
+
+          await notificationService.sendNotification({
+            title: "New Blog Published!",
+            message: message,
+            eventType: 'BLOG_POSTED',
+            targetType: 'all',
+            metadata: { blogTitle: blogData.title }
+          });
+        } catch (notifyError) {
+          console.error('Failed to send blog notification from dashboard:', notifyError);
+        }
+
         return { success: true, message: 'Blog created successfully!' }
       } else {
         const blogId = formData.get('blog_id')

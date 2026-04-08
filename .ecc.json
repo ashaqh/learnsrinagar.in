@@ -1,0 +1,11 @@
+{
+  "ecc": true,
+  "mode": "multi-agent",
+  "engine": "external-ai-tool",
+  "agents": [
+    "planner",
+    "architect",
+    "developer",
+    "reviewer"
+  ]
+}

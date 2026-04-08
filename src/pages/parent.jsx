@@ -55,15 +55,15 @@ import {
 import { Badge } from '@/components/ui/badge'
 
 export async function loader() {
-  const [parents] = await query(
+  const parents = await query(
     `SELECT id, name, email, created_at FROM users WHERE role_id = ?`,
     [6]
   )
-  const [students] = await query(
+  const students = await query(
     `SELECT id, name, email FROM users WHERE role_id = ?`,
     [5]
   )
-  const [links] = await query(
+  const links = await query(
     `SELECT psl.id, psl.parent_id, psl.student_id, s.name AS student_name, s.email AS student_email
      FROM parent_student_links psl
      JOIN users s ON psl.student_id = s.id`
@@ -93,7 +93,7 @@ export async function action({ request }) {
       const email = formData.get('email')
       const password = formData.get('password')
 
-      const [existing] = await query(`SELECT id FROM users WHERE email = ?`, [
+      const existing = await query(`SELECT id FROM users WHERE email = ?`, [
         email,
       ])
       if (existing.length > 0) {
@@ -119,7 +119,7 @@ export async function action({ request }) {
       const email = formData.get('email')
       const password = formData.get('password')
 
-      const [existing] = await query(
+      const existing = await query(
         `SELECT id FROM users WHERE email = ? AND id != ?`,
         [email, id]
       )
@@ -159,7 +159,7 @@ export async function action({ request }) {
       const parent_id = formData.get('parent_id')
       const student_id = formData.get('student_id')
 
-      const [existing] = await query(
+      const existing = await query(
         `SELECT id FROM parent_student_links WHERE parent_id = ? AND student_id = ?`,
         [parent_id, student_id]
       )

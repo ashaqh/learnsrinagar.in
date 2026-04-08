@@ -87,14 +87,12 @@ export async function loader({ request }) {
     SELECT lc.*, 
            s.name as subject_name, 
            c.name as class_name, 
-           u.name as teacher_name,
-           sch.name as school_name
+           u.name as teacher_name
     FROM live_classes lc
     LEFT JOIN subjects s ON lc.subject_id = s.id
     JOIN classes c ON lc.class_id = c.id
     JOIN users u ON lc.teacher_id = u.id
-    LEFT JOIN schools sch ON lc.school_id = sch.id
-    WHERE lc.class_id = ? AND (lc.school_id = ? OR lc.is_all_schools = 1) AND lc.is_active = 1
+    WHERE lc.class_id = ? AND (lc.school_id = ? OR lc.is_all_schools = 1)
     ORDER BY 
       CASE 
         WHEN lc.status = 'live' THEN 1
@@ -130,8 +128,9 @@ export default function StudentLiveClasses() {
   })
 
   const handleWatchLive = (liveClass) => {
-    // YouTube blocks embedding, so open in new tab
-    window.open(liveClass.youtube_live_link, '_blank')
+    const videoId = extractYouTubeVideoId(liveClass.youtube_live_link)
+    setSelectedVideo({ ...liveClass, videoId })
+    setDialogOpen(true)
   }
 
   // Update statuses based on current time
@@ -298,13 +297,35 @@ export default function StudentLiveClasses() {
                     )}
                   </div>
                   
-                  <Button 
-                    className='w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition-colors duration-200'
-                    onClick={() => handleWatchLive(liveClass)}
-                  >
-                    <Play className='mr-2 h-5 w-5' />
-                    Join Live Session
-                  </Button>
+                  <div className='flex flex-col gap-2'>
+                    {liveClass.zoom_link ? (
+                      <>
+                        <Button 
+                          className='w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors duration-200'
+                          onClick={() => window.open(liveClass.zoom_link, '_blank')}
+                        >
+                          <ExternalLink className='mr-2 h-5 w-5' />
+                          Join Zoom Class
+                        </Button>
+                        <Button 
+                          variant='outline'
+                          className='w-full border-red-600 text-red-600 hover:bg-red-50 font-semibold py-3 rounded-lg transition-colors duration-200'
+                          onClick={() => handleWatchLive(liveClass)}
+                        >
+                          <Play className='mr-2 h-5 w-5' />
+                          Watch on YouTube
+                        </Button>
+                      </>
+                    ) : (
+                      <Button 
+                        className='w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition-colors duration-200'
+                        onClick={() => handleWatchLive(liveClass)}
+                      >
+                        <Play className='mr-2 h-5 w-5' />
+                        Join Live Session
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </Card>
             ))}
@@ -357,14 +378,37 @@ export default function StudentLiveClasses() {
                     )}
                   </div>
                   
-                  <Button 
-                    variant='outline' 
-                    className='w-full border-blue-200 hover:bg-blue-50 hover:border-blue-300 transition-colors duration-200'
-                    onClick={() => handleWatchLive(liveClass)}
-                  >
-                    <Clock className='mr-2 h-4 w-4' />
-                    Preview Session
-                  </Button>
+                  <div className='flex flex-col gap-2 mt-auto'>
+                    {liveClass.zoom_link ? (
+                      <>
+                        <Button 
+                          variant='outline'
+                          className='w-full border-blue-200 hover:bg-blue-50 text-blue-700 transition-colors duration-200'
+                          onClick={() => window.open(liveClass.zoom_link, '_blank')}
+                        >
+                          <ExternalLink className='mr-2 h-4 w-4' />
+                          Join Zoom (Starts Soon)
+                        </Button>
+                        <Button 
+                          variant='ghost' 
+                          className='w-full text-red-600 hover:bg-red-50 transition-colors duration-200'
+                          onClick={() => handleWatchLive(liveClass)}
+                        >
+                          <Play className='mr-2 h-4 w-4' />
+                          Watch on YouTube
+                        </Button>
+                      </>
+                    ) : (
+                      <Button 
+                        variant='outline' 
+                        className='w-full border-blue-200 hover:bg-blue-50 hover:border-blue-300 transition-colors duration-200'
+                        onClick={() => handleWatchLive(liveClass)}
+                      >
+                        <Clock className='mr-2 h-4 w-4' />
+                        Preview Session
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </Card>
             ))}
@@ -411,14 +455,16 @@ export default function StudentLiveClasses() {
                     )}
                   </div>
                   
-                  <Button 
-                    variant='outline' 
-                    className='w-full border-green-200 hover:bg-green-50 hover:border-green-300 transition-colors duration-200'
-                    onClick={() => handleWatchLive(liveClass)}
-                  >
-                    <Play className='mr-2 h-4 w-4' />
-                    Watch Recording
-                  </Button>
+                  <div className='flex flex-col gap-2 mt-auto'>
+                    <Button 
+                      variant='outline' 
+                      className='w-full border-green-200 hover:bg-green-50 hover:border-green-300 transition-colors duration-200'
+                      onClick={() => handleWatchLive(liveClass)}
+                    >
+                      <Play className='mr-2 h-4 w-4' />
+                      Watch on YouTube
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -452,39 +498,59 @@ export default function StudentLiveClasses() {
       )}
 
       {/* Video Player Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setSelectedVideo(null); }}>
         <DialogContent className='max-w-4xl max-h-[90vh]'>
           <DialogHeader>
             <DialogTitle>{selectedVideo?.title}</DialogTitle>
             <DialogDescription>
-              {selectedVideo?.topic_name} - {selectedVideo?.teacher_name}
+              {selectedVideo?.topic_name} — {selectedVideo?.teacher_name}
+              {selectedVideo?.subject_name && ` • ${selectedVideo.subject_name}`}
             </DialogDescription>
           </DialogHeader>
           {selectedVideo && (
-            <div className='aspect-video'>
-              {selectedVideo.videoId ? (
-                <iframe
-                  width='100%'
-                  height='100%'
-                  src={`https://www.youtube.com/embed/${selectedVideo.videoId}?autoplay=1`}
-                  title={selectedVideo.title}
-                  frameBorder='0'
-                  allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-                  allowFullScreen
-                  className='rounded-lg'
-                ></iframe>
-              ) : (
-                <iframe
-                  width='100%'
-                  height='100%'
-                  src={selectedVideo.youtube_live_link}
-                  title={selectedVideo.title}
-                  frameBorder='0'
-                  allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-                  allowFullScreen
-                  className='rounded-lg'
-                ></iframe>
-              )}
+            <div className='space-y-4'>
+              <div className='aspect-video rounded-lg overflow-hidden bg-black'>
+                {selectedVideo.videoId ? (
+                  <iframe
+                    width='100%'
+                    height='100%'
+                    src={`https://www.youtube.com/embed/${selectedVideo.videoId}?autoplay=1`}
+                    title={selectedVideo.title}
+                    frameBorder='0'
+                    allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
+                    allowFullScreen
+                    className='rounded-lg'
+                  ></iframe>
+                ) : (
+                  <div className='flex flex-col items-center justify-center h-full text-white'>
+                    <Play className='h-16 w-16 mb-4 opacity-60' />
+                    <p className='text-sm opacity-60 mb-4'>Unable to embed this video</p>
+                    <Button
+                      className='bg-red-600 hover:bg-red-700'
+                      onClick={() => window.open(selectedVideo.youtube_live_link, '_blank')}
+                    >
+                      <ExternalLink className='mr-2 h-4 w-4' />
+                      Open on YouTube
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                <div className='flex items-center gap-4'>
+                  {selectedVideo.start_time && (
+                    <span>📅 {new Date(selectedVideo.start_time).toLocaleString()}</span>
+                  )}
+                  {selectedVideo.status && getStatusBadge(selectedVideo.status)}
+                </div>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => window.open(selectedVideo.youtube_live_link, '_blank')}
+                >
+                  <ExternalLink className='mr-2 h-3 w-3' />
+                  Open in YouTube
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

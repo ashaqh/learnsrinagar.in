@@ -20,9 +20,11 @@ import {
   UserCheck,
   User,
   FileText,
+  Bell,
 } from 'lucide-react'
 
 import { getUser } from '@/lib/auth'
+import NotificationBell from './NotificationBell'
 
 import {
   Breadcrumb,
@@ -61,6 +63,7 @@ const ALL_LINKS = [
   { title: 'Teacher', icon: GraduationCap, url: '/teacher' },
   { title: 'Live Class', icon: RadioTower, url: '/live-class' },
   { title: 'Manage Live Classes', icon: RadioTower, url: '/manage-live-classes' },
+  { title: 'View Live Classes', icon: RadioTower, url: '/manage-live-classes' },
   { title: 'Live Classes', icon: RadioTower, url: '/student-live-classes' },
   { title: 'Class Admin', icon: UserCog, url: '/class-admin' },
   { title: 'Timetable', icon: CalendarClock, url: '/timetable' },
@@ -71,12 +74,14 @@ const ALL_LINKS = [
   { title: 'Manage Blogs', icon: FileText, url: '/manage-blogs' },
   { title: 'Change Password', icon: UserCog, url: '/change-password' },
   // { title: 'Parent', icon: User, url: '/parent' },
+  { title: 'Notifications', icon: Bell, url: '/notifications' },
   { title: 'Logout', icon: LogOut, url: '/logout' },
 ]
 
 const ROLE_LINKS = {
   super_admin: [
     'Dashboard',
+    'Notifications',
     'School Admin',
     'School',
     'Teacher',
@@ -88,11 +93,11 @@ const ROLE_LINKS = {
     'Manage Blogs',
     'Change Password',
   ],
-  school_admin: ['Class Admin', 'Manage Live Classes', 'Attendance', 'Timetable', 'Student', 'Parent', 'Change Password'],
-  class_admin: ['Attendance', 'Timetable', 'Student', 'Parent', 'Change Password'],
-  teacher: ['Manage Live Classes', 'Timetable', 'Homework', 'Change Password'],
-  student: ['Live Classes', 'Attendance', 'Timetable', 'Homework', 'Change Password'],
-  parent: ['Attendance', 'Timetable', 'Homework', 'Feedback', 'Change Password'],
+  school_admin: ['Dashboard', 'Notifications', 'Class Admin', 'View Live Classes', 'Attendance', 'Timetable', 'Student', 'Parent', 'Homework', 'Change Password'],
+  class_admin: ['Dashboard', 'Notifications', 'View Live Classes', 'Attendance', 'Timetable', 'Student', 'Parent', 'Change Password'],
+  teacher: ['Dashboard', 'Notifications', 'Manage Live Classes', 'Timetable', 'Homework', 'Change Password'],
+  student: ['Dashboard', 'Notifications', 'Live Classes', 'Attendance', 'Timetable', 'Homework', 'Change Password'],
+  parent: ['Dashboard', 'Notifications', 'Attendance', 'Timetable', 'Homework', 'Feedback', 'Change Password'],
 }
 
 export default function Layout() {
@@ -105,6 +110,14 @@ export default function Layout() {
   const visibleLinks = ALL_LINKS.filter(
     (link) => allowedTitles.includes(link.title) || link.title === 'Logout' // Always show logout
   )
+
+  const getLinkLabel = (link) => {
+    if (role === 'teacher' && link.title === 'Manage Live Classes') {
+      return 'Live Class'
+    }
+
+    return link.title
+  }
 
   const isActivePath = (url) => location.pathname === url
 
@@ -147,10 +160,10 @@ export default function Layout() {
                 <Link to={item.url}>
                   <SidebarMenuButton
                     isActive={isActivePath(item.url)}
-                    tooltip={item.title}
+                    tooltip={getLinkLabel(item)}
                   >
                     {item.icon && <item.icon />}
-                    <span>{item.title}</span>
+                    <span>{getLinkLabel(item)}</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
@@ -189,24 +202,29 @@ export default function Layout() {
 
       <SidebarInset>
         <header className='flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12'>
-          <div className='flex items-center gap-2 px-4'>
-            <SidebarTrigger />
-            <Separator orientation='vertical' className='mr-2 h-4' />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className='hidden md:block'>
-                  <BreadcrumbLink>Learn Srinagar</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className='hidden md:block' />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>
-                    <Link to={location.pathname}>
-                      {formatPathName(location.pathname)}
-                    </Link>
-                  </BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
+          <div className='flex flex-1 items-center justify-between gap-2 px-4'>
+            <div className='flex items-center gap-2'>
+              <SidebarTrigger />
+              <Separator orientation='vertical' className='mr-2 h-4' />
+              <Breadcrumb>
+                <BreadcrumbList>
+                  <BreadcrumbItem className='hidden md:block'>
+                    <BreadcrumbLink>Learn Srinagar</BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className='hidden md:block' />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>
+                      <Link to={location.pathname}>
+                        {formatPathName(location.pathname)}
+                      </Link>
+                    </BreadcrumbPage>
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+            </div>
+            <div className='flex items-center gap-4'>
+              <NotificationBell />
+            </div>
           </div>
         </header>
         <div className='p-2 sm:p-4 pt-0'>

@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/table'
 
 export async function loader() {
-  const [classes] = await query(`SELECT * FROM classes`)
+  const classes = await query(`SELECT * FROM classes`)
   return { classes }
 }
 
@@ -62,7 +62,7 @@ export async function action({ request }) {
           message: 'Class name must contain only numbers (e.g., 1, 2, 3).',
         }
       }
-      const [existing] = await query(`SELECT id FROM classes WHERE name = ?`, [
+      const existing = await query(`SELECT id FROM classes WHERE name = ?`, [
         name,
       ])
       if (existing.length > 0) {
@@ -85,7 +85,7 @@ export async function action({ request }) {
           message: 'Class name must contain only numbers (e.g., 1, 2, 3).',
         }
       }
-      const [existing] = await query(
+      const existing = await query(
         `SELECT id FROM classes WHERE name = ? AND id != ?`,
         [name, id]
       )

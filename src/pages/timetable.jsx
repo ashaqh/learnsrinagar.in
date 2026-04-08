@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { VideoIcon, CalendarIcon } from 'lucide-react'
+import { VideoIcon, CalendarIcon, Youtube } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
@@ -19,12 +19,12 @@ export async function loader({ request }) {
 
   const liveClasses = await query(`
     SELECT z.*,
-           s.name AS subject_name,
+           IFNULL(s.name, z.topic_name) AS subject_name,
            c.name AS class_name,
            z.class_id,
            u.name AS teacher_name
     FROM live_classes z
-    JOIN subjects s  ON z.subject_id = s.id
+    LEFT JOIN subjects s  ON z.subject_id = s.id
     JOIN classes c   ON z.class_id   = c.id
     JOIN users u     ON z.teacher_id = u.id
     ORDER BY z.start_time ASC
@@ -46,38 +46,18 @@ export default function Timetable() {
   const isTeacher = user && user.role_name === 'teacher'
 
   // Check if user has permission to join class (super_admin, school_admin, class_admin, teacher)
-  const canJoinClass =
-    user &&
-    ['super_admin', 'school_admin', 'class_admin', 'teacher'].includes(
-      user.role_name
-    )
+  // Everyone can join classes now
+  const canJoinClass = true
 
   useEffect(() => {
     // Filter classes by selected date
     const selectedDateObj = new Date(selectedDate)
     let filteredClasses = liveClasses.filter((cls) => {
-      const classDate = new Date(cls.class_date)
+      const classDate = new Date(cls.start_time)
       return isSameDay(classDate, selectedDateObj)
     })
 
-    // Filter by user's class permissions
-    if (user && user.class_ids) {
-      const classIds = Array.isArray(user.class_ids)
-        ? user.class_ids
-        : user.class_ids.split(',').map((id) => parseInt(id.trim()))
-      if (classIds.length !== 0) {
-        filteredClasses = filteredClasses.filter((zc) =>
-          classIds.includes(zc.class_id)
-        )
-      }
-    }
-
-    // If user is a teacher, only show their classes
-    if (isTeacher) {
-      filteredClasses = filteredClasses.filter(
-        (zc) => zc.teacher_id === user.id
-      )
-    }
+    // Role-based and class-based filtering removed for universal access
 
     // If not a teacher and a specific teacher is selected, filter by that teacher
     if (selectedTeacher !== 'all') {
@@ -88,8 +68,8 @@ export default function Timetable() {
 
     // Sort classes by time
     filteredClasses.sort((a, b) => {
-      const timeA = new Date(`2000-01-01T${a.class_time}`).getTime()
-      const timeB = new Date(`2000-01-01T${b.class_time}`).getTime()
+      const timeA = new Date(a.start_time).getTime()
+      const timeB = new Date(b.start_time).getTime()
       return timeA - timeB
     })
 
@@ -121,16 +101,13 @@ export default function Timetable() {
     const timeSlotMap = new Map()
 
     filteredClasses.forEach((cls) => {
-      // Create a Date object with just the time portion
-      const startTime = new Date(`2000-01-01T${cls.class_time}`)
-      // Add duration to get end time
-      const endTime = new Date(
-        startTime.getTime() + cls.duration_minutes * 60000
-      )
+      // Create a Date object
+      const startTime = new Date(cls.start_time)
+      const endTime = new Date(cls.end_time)
 
-      const timeKey = `${format(startTime, 'h:mm')} - ${format(
+      const timeKey = `${format(startTime, 'h:mm a')} - ${format(
         endTime,
-        'h:mm'
+        'h:mm a'
       )}`
 
       if (!timeSlotMap.has(timeKey)) {
@@ -187,26 +164,23 @@ export default function Timetable() {
 
     // Fill in timetable with class data
     filteredClasses.forEach((cls) => {
-      // Create Date objects with just the time portion
-      const startTime = new Date(`2000-01-01T${cls.class_time}`)
-      // Add duration to get end time
-      const endTime = new Date(
-        startTime.getTime() + cls.duration_minutes * 60000
-      )
+      const startTime = new Date(cls.start_time)
+      const endTime = new Date(cls.end_time)
 
-      const timeKey = `${format(startTime, 'h:mm')} - ${format(
+      const timeKey = `${format(startTime, 'h:mm a')} - ${format(
         endTime,
-        'h:mm'
+        'h:mm a'
       )}`
 
-      timetable[cls.class_id][timeKey] = {
+        timetable[cls.class_id][timeKey] = {
         id: cls.id,
         subject: cls.subject_name,
         teacher: cls.teacher_name,
         startTime,
         endTime,
-        joinUrl: cls.join_url,
-        description: cls.description,
+        joinUrl: cls.youtube_live_link,
+        zoomLink: cls.zoom_link,
+        description: cls.topic_name,
       }
     })
 
@@ -310,17 +284,40 @@ export default function Timetable() {
                           </div>
                         )}
                         {canJoinClass && (
-                          <div className='mt-2 sm:mt-3'>
-                            <a
-                              href={classInfo.joinUrl}
-                              target='_blank'
-                              rel='noopener noreferrer'
-                              className='inline-flex items-center justify-center rounded-md bg-primary px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
-                            >
-                              <VideoIcon className='h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1 sm:mr-1.5' />
-                              <span className='hidden sm:inline'>Join Class</span>
-                              <span className='sm:hidden'>Join</span>
-                            </a>
+                          <div className='mt-2 sm:mt-3 flex flex-col sm:flex-row justify-center gap-2'>
+                            {classInfo.zoomLink ? (
+                              <>
+                                <a
+                                  href={classInfo.zoomLink}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='inline-flex items-center justify-center rounded-md bg-indigo-600 px-2 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-medium text-white transition-colors hover:bg-indigo-700'
+                                >
+                                  <VideoIcon className='h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1' />
+                                  <span>Zoom</span>
+                                </a>
+                                <a
+                                  href={classInfo.joinUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='inline-flex items-center justify-center rounded-md border border-red-200 bg-white px-2 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-medium text-red-600 transition-colors hover:bg-red-50'
+                                >
+                                  <Youtube className='h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1' />
+                                  <span>YouTube</span>
+                                </a>
+                              </>
+                            ) : (
+                              <a
+                                href={classInfo.joinUrl}
+                                target='_blank'
+                                rel='noopener noreferrer'
+                                className='inline-flex items-center justify-center rounded-md bg-primary px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
+                              >
+                                <VideoIcon className='h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1 sm:mr-1.5' />
+                                <span className='hidden sm:inline'>Join Class</span>
+                                <span className='sm:hidden'>Join</span>
+                              </a>
+                            )}
                           </div>
                         )}
                       </td>

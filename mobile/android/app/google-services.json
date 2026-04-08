@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "244006161474",
+    "project_id": "hybrid-learning-system-fb8f5",
+    "storage_bucket": "hybrid-learning-system-fb8f5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:244006161474:android:125951dea0932260ab31db",
+        "android_client_info": {
+          "package_name": "com.apprise.hls"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFk-fskKxQD-wr4Pl3cDGLwu9nGeufG1A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

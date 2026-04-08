@@ -41,8 +41,8 @@ import {
 } from '@/components/ui/table'
 
 export async function loader() {
-  const [roles] = await query(`SELECT * FROM roles`)
-  const [admins] = await query(
+  const roles = await query(`SELECT * FROM roles`)
+  const admins = await query(
     `
     SELECT u.*, r.name AS role_name
     FROM users u

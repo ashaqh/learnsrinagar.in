@@ -56,13 +56,13 @@ import {
 export async function loader({ request }) {
   const user = await getUser(request)
 
-  const [users] = await query('SELECT id, name FROM users WHERE role_id = ?', [
+  const users = await query('SELECT id, name FROM users WHERE role_id = ?', [
     3,
   ])
   // Schools are retrieved but only for displaying existing assignments
-  const [schools] = await query('SELECT id, name FROM schools')
-  const [classes] = await query('SELECT id, name FROM classes')
-  const [classAdmins] = await query(`
+  const schools = await query('SELECT id, name FROM schools')
+  const classes = await query('SELECT id, name FROM classes')
+  const classAdmins = await query(`
     SELECT ca.id,
            ca.admin_id,
            ca.school_id,
@@ -96,7 +96,7 @@ export async function action({ request }) {
 
       try {
         // Check if email exists
-        const [exists] = await query('SELECT id FROM users WHERE email = ?', [
+        const exists = await query('SELECT id FROM users WHERE email = ?', [
           email,
         ])
         if (exists.length > 0) {
@@ -112,7 +112,7 @@ export async function action({ request }) {
         // Create user
         const salt = await bcrypt.genSalt(10)
         const password_hash = await bcrypt.hash(password, salt)
-        const [result] = await query(
+        const result = await query(
           'INSERT INTO users (name, email, password_hash, role_id) VALUES (?, ?, ?, 3)',
           [name, email, password_hash]
         )
@@ -149,7 +149,7 @@ export async function action({ request }) {
       const class_id = formData.get('class_id')
 
       // Find the admin_id associated with this assignment
-      const [currentAssignment] = await query(
+      const currentAssignment = await query(
         `SELECT admin_id FROM class_admins WHERE id = ?`,
         [id]
       )
@@ -161,7 +161,7 @@ export async function action({ request }) {
       const admin_id = currentAssignment[0].admin_id
 
       // Check for email conflicts
-      const [emailExists] = await query(
+      const emailExists = await query(
         `SELECT id FROM users WHERE email = ? AND id != ?`,
         [email, admin_id]
       )
@@ -196,7 +196,7 @@ export async function action({ request }) {
         }
 
         // Update class assignment
-        const [exists] = await query(
+        const exists = await query(
           `SELECT id
            FROM class_admins
            WHERE admin_id = ? AND school_id = ? AND class_id = ? AND id != ?`,

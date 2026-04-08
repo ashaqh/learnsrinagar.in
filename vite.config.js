@@ -25,6 +25,30 @@ export default defineConfig({
         return defineRoutes((route) => {
           route("/", "./pages/index.jsx", { index: true });
           route("/login", "./pages/login.jsx");
+          route("/api/auth/login", "./pages/api.login.js");
+          route("/api/dashboard", "./pages/api.dashboard.js");
+          route("/api/attendance", "./pages/api.attendance.js");
+          route("/api/homework", "./pages/api.homework.js");
+          route("/api/live-classes", "./pages/api.live_classes.js");
+          route("/api/feedback", "./pages/api.feedback.js");
+          route("/api/timetable", "./pages/api.timetable.js");
+          
+          // Admin API Routes
+          route("/api/admin/schools", "./pages/api.admin.schools.js");
+          route("/api/admin/users", "./pages/api.admin.users.js");
+          route("/api/admin/classes", "./pages/api.admin.classes.js");
+          route("/api/admin/subjects", "./pages/api.admin.subjects.js");
+          route("/api/admin/teachers", "./pages/api.admin.teachers.js");
+          route("/api/admin/live-classes", "./pages/api.admin.live-classes.js");
+          route("/api/admin/blogs", "./pages/api.admin.blogs.js");
+          route("/api/admin/blog-categories", "./pages/api.admin.blog-categories.js");
+          route("/api/admin/students", "./pages/api.admin.students.js");
+          route("/api/admin/class-admins", "./pages/api.admin.class-admins.js");
+          route("/api/notifications", "./pages/api.notifications.js");
+          route("/api/change-password", "./pages/api.change-password.js");
+          route("/api/blog/:id", "./pages/api.blog.$id.js");
+          route("/api/blogs-public", "./pages/api.blogs.js");
+
           route("/blogs", "./pages/blogs.jsx");
           route("/blog/:id", "./pages/blog.$id.jsx");
           route("/.well-known/*", "./pages/.well-known.jsx");
@@ -49,6 +73,7 @@ export default defineConfig({
               route("/student-live-classes", "./pages/student-live-classes.jsx"),
               route("/change-password", "./pages/change-password.jsx"),
               route("/manage-blogs", "./pages/manage-blogs.jsx"),
+              route("/notifications", "./pages/notifications.jsx"),
             ];
           })
         });

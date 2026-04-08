@@ -102,13 +102,13 @@ export async function loader({ request }) {
 
   if (user.role_name === 'super_admin') {
     // Super admin can see all
-    const [schoolsResult] = await query('SELECT * FROM schools ORDER BY name')
-    const [classesResult] = await query('SELECT * FROM classes ORDER BY name')
-    const [subjectsResult] = await query('SELECT * FROM subjects ORDER BY name')
-    const [teachersResult] = await query(
+    const schoolsResult = await query('SELECT * FROM schools ORDER BY name')
+    const classesResult = await query('SELECT * FROM classes ORDER BY name')
+    const subjectsResult = await query('SELECT * FROM subjects ORDER BY name')
+    const teachersResult = await query(
       'SELECT id, name FROM users WHERE role_id = 4 ORDER BY name'
     )
-    const [liveClassesResult] = await query(`
+    const liveClassesResult = await query(`
       SELECT lc.*, s.name as subject_name, c.name as class_name, u.name as teacher_name, sch.name as school_name
       FROM live_classes lc
       LEFT JOIN subjects s ON lc.subject_id = s.id
@@ -125,16 +125,16 @@ export async function loader({ request }) {
     liveClasses = liveClassesResult
   } else if (user.role_name === 'school_admin') {
     // School admin can see their school's data
-    const [schoolsResult] = await query('SELECT * FROM schools WHERE users_id = ?', [user.id])
+    const schoolsResult = await query('SELECT * FROM schools WHERE users_id = ?', [user.id])
     const schoolId = schoolsResult[0]?.id
     
     if (schoolId) {
-      const [classesResult] = await query('SELECT * FROM classes ORDER BY name')
-      const [subjectsResult] = await query('SELECT * FROM subjects ORDER BY name')
-      const [teachersResult] = await query(
+      const classesResult = await query('SELECT * FROM classes ORDER BY name')
+      const subjectsResult = await query('SELECT * FROM subjects ORDER BY name')
+      const teachersResult = await query(
         'SELECT id, name FROM users WHERE role_id = 4 ORDER BY name'
       )
-      const [liveClassesResult] = await query(`
+      const liveClassesResult = await query(`
         SELECT lc.*, s.name as subject_name, c.name as class_name, u.name as teacher_name, sch.name as school_name
         FROM live_classes lc
         LEFT JOIN subjects s ON lc.subject_id = s.id
@@ -153,7 +153,7 @@ export async function loader({ request }) {
     }
   } else if (user.role_name === 'teacher') {
     // Teachers can only see their assigned classes and subjects
-    const [classesResult] = await query(`
+    const classesResult = await query(`
       SELECT DISTINCT c.id, c.name
       FROM classes c
       JOIN teacher_assignments ta ON c.id = ta.class_id
@@ -161,7 +161,7 @@ export async function loader({ request }) {
       ORDER BY c.name
     `, [user.id])
 
-    const [subjectsResult] = await query(`
+    const subjectsResult = await query(`
       SELECT DISTINCT s.id, s.name
       FROM subjects s
       JOIN teacher_assignments ta ON s.id = ta.subject_id
@@ -169,7 +169,7 @@ export async function loader({ request }) {
       ORDER BY s.name
     `, [user.id])
 
-    const [liveClassesResult] = await query(`
+    const liveClassesResult = await query(`
       SELECT lc.*, s.name as subject_name, c.name as class_name, u.name as teacher_name, sch.name as school_name
       FROM live_classes lc
       LEFT JOIN subjects s ON lc.subject_id = s.id
@@ -197,6 +197,13 @@ export async function action({ request }) {
   const user = await getUser(request)
   if (!user) return redirect('/login')
 
+  if (user.role_name === 'teacher') {
+    return {
+      success: false,
+      message: 'You have view-only access to live classes',
+    }
+  }
+
   const formData = await request.formData()
   const intent = formData.get('intent')
 
@@ -213,6 +220,8 @@ export async function action({ request }) {
       const start_time = formData.get('start_time')
       const end_time = formData.get('end_time')
       
+      const zoom_link = formData.get('zoom_link')
+      
       if (!start_time || !end_time) {
         return {
           success: false,
@@ -228,15 +237,16 @@ export async function action({ request }) {
 
       // If "all" schools selected, create session for each school
       if (school_id === 'all' && user.role_name === 'super_admin') {
-        const [allSchools] = await query('SELECT id FROM schools')
+        const allSchools = await query('SELECT id FROM schools')
         
         for (const school of allSchools) {
           await query(
-            `INSERT INTO live_classes (title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, start_time, end_time, status, created_by_role)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO live_classes (title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, start_time, end_time, status, created_by_role)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               title,
               youtube_live_link,
+              zoom_link,
               session_type,
               topic_name,
               subject_id,
@@ -252,11 +262,12 @@ export async function action({ request }) {
         }
       } else {
         await query(
-          `INSERT INTO live_classes (title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, start_time, end_time, status, created_by_role)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO live_classes (title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, start_time, end_time, status, created_by_role)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             title,
             youtube_live_link,
+            zoom_link,
             session_type,
             topic_name,
             subject_id,
@@ -286,6 +297,8 @@ export async function action({ request }) {
       const start_time = formData.get('start_time')
       const end_time = formData.get('end_time')
       
+      const zoom_link = formData.get('zoom_link')
+      
       if (!start_time || !end_time) {
         return {
           success: false,
@@ -297,20 +310,9 @@ export async function action({ request }) {
 
       await query(
         `UPDATE live_classes
-         SET title = ?, youtube_live_link = ?, session_type = ?, topic_name = ?, subject_id = ?, class_id = ?, start_time = ?, end_time = ?, status = ?
+         SET title = ?, youtube_live_link = ?, zoom_link = ?, session_type = ?, topic_name = ?, subject_id = ?, class_id = ?, start_time = ?, end_time = ?, status = ?
          WHERE id = ?`,
-        [
-          title,
-          youtube_live_link,
-          session_type,
-          topic_name,
-          subject_id,
-          class_id,
-          start_time,
-          end_time,
-          status,
-          id,
-        ]
+        [title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, start_time, end_time, status, id]
       )
 
       return {
@@ -342,6 +344,7 @@ export default function LiveClass() {
   const actionData = useActionData()
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
+  const isReadOnly = user?.role_name === 'teacher'
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState('create')
@@ -451,40 +454,44 @@ export default function LiveClass() {
       header: 'Actions',
       cell: ({ row }) => (
         <div className='flex justify-center space-x-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => handleEdit(row.original)}
-          >
-            <Edit className='h-4 w-4' />
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
+          {!isReadOnly && (
+            <>
               <Button
                 variant='outline'
                 size='sm'
-                onClick={() => setToDelete(row.original)}
+                onClick={() => handleEdit(row.original)}
               >
-                <Trash2 className='h-4 w-4' />
+                <Edit className='h-4 w-4' />
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete Live Class</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to delete "{toDelete?.title}"? This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <Form method='post'>
-                  <input type='hidden' name='intent' value='delete' />
-                  <input type='hidden' name='id' value={toDelete?.id} />
-                  <AlertDialogAction type='submit'>Delete</AlertDialogAction>
-                </Form>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setToDelete(row.original)}
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Live Class</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete "{toDelete?.title}"? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <Form method='post'>
+                      <input type='hidden' name='intent' value='delete' />
+                      <input type='hidden' name='id' value={toDelete?.id} />
+                      <AlertDialogAction type='submit'>Delete</AlertDialogAction>
+                    </Form>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
           <Button
             variant='outline'
             size='sm'
@@ -524,13 +531,17 @@ export default function LiveClass() {
             <div>
               <CardTitle className='text-2xl font-bold'>Live Classes</CardTitle>
               <CardDescription>
-                Manage YouTube Live lecture sessions for students
+                {isReadOnly
+                  ? 'View live lecture sessions for students'
+                  : 'Manage YouTube Live lecture sessions for students'}
               </CardDescription>
             </div>
-            <Button onClick={handleCreate}>
-              <Plus className='mr-2 h-4 w-4' />
-              Add Live Session
-            </Button>
+            {!isReadOnly && (
+              <Button onClick={handleCreate}>
+                <Plus className='mr-2 h-4 w-4' />
+                Add Live Session
+              </Button>
+            )}
           </div>
           
           <div className='grid grid-cols-1 md:grid-cols-4 gap-4 mt-4'>
@@ -586,24 +597,25 @@ export default function LiveClass() {
           </div>
         </CardHeader>
         
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <div style={{display: 'none'}} />
-          </DialogTrigger>
-            <DialogContent className='max-w-2xl max-h-[90vh] overflow-y-auto'>
-              <DialogHeader>
-                <DialogTitle>
-                  {dialogType === 'create'
-                    ? 'Create New Live Session'
-                    : 'Edit Live Session'}
-                </DialogTitle>
-                <DialogDescription>
-                  {dialogType === 'create'
-                    ? 'Add a new YouTube Live lecture session for students.'
-                    : 'Update the live session information.'}
-                </DialogDescription>
-              </DialogHeader>
-              <Form method='post'>
+        {!isReadOnly && (
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <div style={{display: 'none'}} />
+            </DialogTrigger>
+              <DialogContent className='max-w-2xl max-h-[90vh] overflow-y-auto'>
+                <DialogHeader>
+                  <DialogTitle>
+                    {dialogType === 'create'
+                      ? 'Create New Live Session'
+                      : 'Edit Live Session'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {dialogType === 'create'
+                      ? 'Add a new YouTube Live lecture session for students.'
+                      : 'Update the live session information.'}
+                  </DialogDescription>
+                </DialogHeader>
+                <Form method='post'>
                 <input
                   type='hidden'
                   name='intent'
@@ -792,9 +804,10 @@ export default function LiveClass() {
                       : 'Update Session'}
                   </Button>
                 </div>
-              </Form>
-            </DialogContent>
-        </Dialog>
+                </Form>
+              </DialogContent>
+          </Dialog>
+        )}
         <CardContent>
           <div className='rounded-md border'>
             <Table>

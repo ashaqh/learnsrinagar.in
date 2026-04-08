@@ -35,7 +35,14 @@ export async function action({ request }) {
     }
 
     const user = users[0];
-    const isValid = await bcrypt.compare(password, user.password_hash);
+    let passwordHash = user.password_hash;
+
+    // Match the mobile/API login behavior for legacy bcrypt variants.
+    if (passwordHash.startsWith('$2b$')) {
+      passwordHash = passwordHash.replace('$2b$', '$2a$');
+    }
+
+    const isValid = await bcrypt.compare(password, passwordHash);
     
     if (!isValid) {
       return { error: 'Invalid credentials' }
@@ -45,6 +52,10 @@ export async function action({ request }) {
     user.role_id,
   ])
   const role = roles?.[0]
+
+  if (!role?.name) {
+    return { error: 'Unable to resolve user role' }
+  }
 
   const sessionUser = {
     id: user.id,

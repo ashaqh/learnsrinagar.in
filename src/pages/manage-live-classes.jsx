@@ -95,7 +95,7 @@ export async function loader({ request }) {
   const user = await getUser(request)
   if (!user) return redirect('/login')
 
-  const authorizedRoles = ['super_admin', 'school_admin', 'teacher']
+  const authorizedRoles = ['super_admin', 'school_admin', 'class_admin', 'teacher']
   if (!authorizedRoles.includes(user.role_name)) {
     throw new Response('Access denied', { status: 403 })
   }
@@ -141,9 +141,15 @@ export async function loader({ request }) {
     subjects = subjectsResult
     teachers = teachersResult
     liveClasses = liveClassesResult
-  } else if (user.role_name === 'school_admin') {
-    const schoolsResult = await query('SELECT * FROM schools WHERE users_id = ?', [user.id])
-    const schoolId = schoolsResult[0]?.id
+  } else if (user.role_name === 'school_admin' || user.role_name === 'class_admin') {
+    let schoolId = user.school_id;
+    let schoolsResult = [];
+    if (!schoolId && user.role_name === 'school_admin') {
+      schoolsResult = await query('SELECT * FROM schools WHERE users_id = ?', [user.id])
+      schoolId = schoolsResult[0]?.id
+    } else if (schoolId) {
+      schoolsResult = await query('SELECT * FROM schools WHERE id = ?', [schoolId])
+    }
     
     if (schoolId) {
       const classesResult = await query('SELECT * FROM classes ORDER BY name')
@@ -152,13 +158,14 @@ export async function loader({ request }) {
         'SELECT id, name FROM users WHERE role_id = 4 ORDER BY name'
       )
       const liveClassesResult = await query(`
-        SELECT lc.*, s.name as subject_name, c.name as class_name, u.name as teacher_name, sch.name as school_names
+        SELECT lc.*, s.name as subject_name, c.name as class_name, u.name as teacher_name,
+          CASE WHEN lc.is_all_schools = 1 THEN 'All Schools' ELSE sch.name END as school_names
         FROM live_classes lc
         LEFT JOIN subjects s ON lc.subject_id = s.id
         JOIN classes c ON lc.class_id = c.id
         JOIN users u ON lc.teacher_id = u.id
-        JOIN schools sch ON lc.school_id = sch.id
-        WHERE lc.school_id = ?
+        LEFT JOIN schools sch ON lc.school_id = sch.id
+        WHERE lc.school_id = ? OR lc.is_all_schools = 1
         ORDER BY lc.created_at DESC
       `, [schoolId])
 
@@ -166,7 +173,7 @@ export async function loader({ request }) {
       classes = classesResult
       subjects = subjectsResult
       teachers = teachersResult
-      liveClasses = liveClassesResult.map(lc => ({ ...lc, school_count: 1, school_ids: schoolId.toString() }))
+      liveClasses = liveClassesResult.map(lc => ({ ...lc, school_count: lc.is_all_schools ? 2 : 1, school_ids: schoolId.toString() }))
     }
   } else if (user.role_name === 'teacher') {
     const classesResult = await query(`
@@ -209,6 +216,15 @@ export async function action({ request }) {
   const user = await getUser(request)
   if (!user) return redirect('/login')
 
+  // Teachers and admins have view-only access on this screen.
+  if (
+    user.role_name === 'teacher' ||
+    user.role_name === 'school_admin' ||
+    user.role_name === 'class_admin'
+  ) {
+    return { success: false, message: 'You have view-only access to live classes' }
+  }
+
   const formData = await request.formData()
   const intent = formData.get('intent')
 
@@ -224,6 +240,8 @@ export async function action({ request }) {
       const school_id = formData.get('school_id')
       const start_time = formData.get('start_time')
       const end_time = formData.get('end_time')
+      
+      const zoom_link = formData.get('zoom_link')
       
       if (!start_time || !end_time) {
         return {
@@ -242,10 +260,34 @@ export async function action({ request }) {
       const final_school_id = is_all_schools ? null : school_id
       
       await query(
-        `INSERT INTO live_classes (title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools, start_time, end_time, status, created_by_role)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, final_school_id, is_all_schools, start_time, end_time, status, created_by_role]
+        `INSERT INTO live_classes (title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools, start_time, end_time, status, created_by_role)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, teacher_id, final_school_id, is_all_schools, start_time, end_time, status, created_by_role]
       )
+
+      // Trigger Notification
+        try {
+          const { notificationService } = await import("@/services/notificationService.server");
+          const { getLiveClassNotification } = await import("@/services/notificationHelper.server");
+        
+        const notificationMessage = await getLiveClassNotification({
+          topic_name,
+          class_id,
+          teacher_id: teacher_id || user.id,
+          start_time
+        });
+
+        await notificationService.sendNotification({
+          title: "New Live Class Scheduled",
+          message: notificationMessage,
+          eventType: 'CLASS_SCHEDULED',
+          targetType: is_all_schools ? 'all' : 'group',
+          targetId: is_all_schools ? null : class_id,
+          metadata: { topic: topic_name, startTime: start_time, title: title, zoomLink: zoom_link }
+        });
+      } catch (notifyError) {
+        console.error('Failed to send live class notification:', notifyError);
+      }
 
       return {
         success: true,
@@ -262,6 +304,8 @@ export async function action({ request }) {
       const start_time = formData.get('start_time')
       const end_time = formData.get('end_time')
       
+      const zoom_link = formData.get('zoom_link')
+      
       if (!start_time || !end_time) {
         return {
           success: false,
@@ -273,9 +317,9 @@ export async function action({ request }) {
 
       await query(
         `UPDATE live_classes
-         SET title = ?, youtube_live_link = ?, session_type = ?, topic_name = ?, subject_id = ?, class_id = ?, start_time = ?, end_time = ?, status = ?
+         SET title = ?, youtube_live_link = ?, zoom_link = ?, session_type = ?, topic_name = ?, subject_id = ?, class_id = ?, start_time = ?, end_time = ?, status = ?
          WHERE id = ?`,
-        [title, youtube_live_link, session_type, topic_name, subject_id, class_id, start_time, end_time, status, id]
+        [title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, start_time, end_time, status, id]
       )
 
       return {
@@ -308,6 +352,12 @@ export default function ManageLiveClasses() {
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
 
+  // Teachers and admins get read-only access
+  const isReadOnly =
+    user.role_name === 'teacher' ||
+    user.role_name === 'school_admin' ||
+    user.role_name === 'class_admin'
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState('create')
   const [selectedClass, setSelectedClass] = useState(null)
@@ -323,6 +373,30 @@ export default function ManageLiveClasses() {
     class: 'all',
     date: 'all'
   })
+
+  const [zoomLink, setZoomLink] = useState('')
+
+  // Permanent Zoom links for 6th, 7th, 8th
+  const permanentZoomLinks = {
+    '6': 'https://zoom.us/j/6th_class_link',
+    '7': 'https://zoom.us/j/7th_class_link',
+    '8': 'https://zoom.us/j/8th_class_link'
+  }
+
+  const handleClassChange = (classId) => {
+    const className = classes.find(c => c.id.toString() === classId)?.name
+    if (className && permanentZoomLinks[className]) {
+      setZoomLink(permanentZoomLinks[className])
+    }
+  }
+
+  useEffect(() => {
+    if (selectedClass) {
+      setZoomLink(selectedClass.zoom_link || '')
+    } else {
+      setZoomLink('')
+    }
+  }, [selectedClass])
 
   useEffect(() => {
     if (actionData?.success) {
@@ -398,11 +472,14 @@ export default function ManageLiveClasses() {
         <CardHeader>
           <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-4'>
             <div>
-              <CardTitle className='text-2xl font-bold'>Manage Live Classes</CardTitle>
+              <CardTitle className='text-2xl font-bold'>{isReadOnly ? 'Live Classes' : 'Manage Live Classes'}</CardTitle>
               <CardDescription>
-                Efficiently manage YouTube Live lecture sessions with automatic status updates
+                {isReadOnly 
+                  ? 'View scheduled YouTube Live lecture sessions and their status'
+                  : 'Efficiently manage YouTube Live lecture sessions with automatic status updates'}
               </CardDescription>
             </div>
+            {!isReadOnly && (
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
                 <Button onClick={handleCreate}>
@@ -451,6 +528,21 @@ export default function ManageLiveClasses() {
                     </div>
 
                     <div className='grid gap-2'>
+                      <Label htmlFor='zoom_link'>Zoom Live Link (Optional)</Label>
+                      <Input
+                        id='zoom_link'
+                        name='zoom_link'
+                        type='url'
+                        placeholder='https://zoom.us/j/...'
+                        value={zoomLink}
+                        onChange={(e) => setZoomLink(e.target.value)}
+                      />
+                      <p className='text-xs text-muted-foreground'>
+                        Enter the link to the Zoom meeting for this class session.
+                      </p>
+                    </div>
+
+                    <div className='grid gap-2'>
                       <Label htmlFor='session_type'>Session Type *</Label>
                       <Select name='session_type' value={sessionType} onValueChange={setSessionType} required>
                         <SelectTrigger>
@@ -494,7 +586,12 @@ export default function ManageLiveClasses() {
 
                     <div className='grid gap-2'>
                       <Label htmlFor='class_id'>Class *</Label>
-                      <Select name='class_id' required defaultValue={selectedClass?.class_id?.toString()}>
+                      <Select 
+                        name='class_id' 
+                        required 
+                        defaultValue={selectedClass?.class_id?.toString()}
+                        onValueChange={handleClassChange}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder='Select class' />
                         </SelectTrigger>
@@ -581,6 +678,7 @@ export default function ManageLiveClasses() {
                 </Form>
               </DialogContent>
             </Dialog>
+            )}
           </div>
 
           {/* Filters */}
@@ -678,7 +776,7 @@ export default function ManageLiveClasses() {
                   <TableHead className='text-center'>Start Time</TableHead>
                   <TableHead className='text-center'>End Time</TableHead>
                   <TableHead className='text-center'>Status</TableHead>
-                  <TableHead className='text-center'>Actions</TableHead>
+                  {!isReadOnly && <TableHead className='text-center'>Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -705,28 +803,32 @@ export default function ManageLiveClasses() {
                       </TableCell>
                       <TableCell className='text-center'>
                         <div className='flex justify-center space-x-2'>
-                          <Button variant='outline' size='sm' onClick={() => handleEdit(lc)}>
-                            <Edit className='h-4 w-4' />
-                          </Button>
-                          <Form method='post' style={{display: 'inline'}}>
-                            <input type='hidden' name='intent' value='delete' />
-                            <input type='hidden' name='id' value={lc.id} />
-                            <Button 
-                              type='submit' 
-                              variant='outline' 
-                              size='sm' 
-                              onClick={(e) => {
-                                const message = lc.is_all_schools 
-                                  ? `Are you sure you want to delete "${lc.title}" from all schools? This action cannot be undone.`
-                                  : `Are you sure you want to delete "${lc.title}"? This action cannot be undone.`
-                                if (!confirm(message)) {
-                                  e.preventDefault()
-                                }
-                              }}
-                            >
-                              <Trash2 className='h-4 w-4' />
+                          {!isReadOnly && (
+                            <Button variant='outline' size='sm' onClick={() => handleEdit(lc)}>
+                              <Edit className='h-4 w-4' />
                             </Button>
-                          </Form>
+                          )}
+                          {!isReadOnly && (
+                            <Form method='post' style={{display: 'inline'}}>
+                              <input type='hidden' name='intent' value='delete' />
+                              <input type='hidden' name='id' value={lc.id} />
+                              <Button 
+                                type='submit' 
+                                variant='outline' 
+                                size='sm' 
+                                onClick={(e) => {
+                                  const message = lc.is_all_schools 
+                                    ? `Are you sure you want to delete "${lc.title}" from all schools? This action cannot be undone.`
+                                    : `Are you sure you want to delete "${lc.title}"? This action cannot be undone.`
+                                  if (!confirm(message)) {
+                                    e.preventDefault()
+                                  }
+                                }}
+                              >
+                                <Trash2 className='h-4 w-4' />
+                              </Button>
+                            </Form>
+                          )}
                           <Button
                             variant='outline'
                             size='sm'
@@ -741,7 +843,7 @@ export default function ManageLiveClasses() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={user.role_name === 'super_admin' ? 9 : 8} className='h-24 text-center'>
+                    <TableCell colSpan={user.role_name === 'super_admin' ? 9 : (isReadOnly ? 7 : 8)} className='h-24 text-center'>
                       No live classes found matching your filters.
                     </TableCell>
                   </TableRow>
