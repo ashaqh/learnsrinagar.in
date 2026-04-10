@@ -3,7 +3,6 @@ import { query } from '@/lib/db'
 import {
   useLoaderData,
   useSubmit,
-  useNavigate,
   useActionData,
 } from '@remix-run/react'
 import { toast } from 'sonner'
@@ -91,10 +90,35 @@ export async function action({ request }) {
         }
       }
 
-      await query(
+      const result = await query(
         `INSERT INTO schools (name, address, users_id) VALUES (?, ?, ?)`,
         [name, address, users_id]
       )
+
+      try {
+        const { notificationService } = await import('@/services/notificationService.server')
+        const { getSchoolLifecycleNotification } = await import(
+          '@/services/notificationHelper.server'
+        )
+        const message = await getSchoolLifecycleNotification({
+          action: 'created',
+          schoolName: name,
+          associatedUserId: users_id,
+        })
+
+        await notificationService.sendNotification({
+          title: 'New School Added',
+          message,
+          eventType: 'SCHOOL_CREATED',
+          targetType: 'all',
+          metadata: {
+            schoolId: String(result.insertId),
+            schoolName: name,
+          },
+        })
+      } catch (notifyError) {
+        console.error('Failed to send school creation notification:', notifyError)
+      }
 
       return { success: true, message: 'School created successfully' }
     }
@@ -128,8 +152,37 @@ export async function action({ request }) {
 
     if (action === 'delete') {
       const id = formData.get('id')
+      const existingSchool = await query(`SELECT name FROM schools WHERE id = ?`, [id])
+
+      if (existingSchool.length === 0) {
+        return { success: false, message: 'School not found' }
+      }
 
       await query(`DELETE FROM schools WHERE id = ?`, [id])
+
+      try {
+        const { notificationService } = await import('@/services/notificationService.server')
+        const { getSchoolLifecycleNotification } = await import(
+          '@/services/notificationHelper.server'
+        )
+        const message = await getSchoolLifecycleNotification({
+          action: 'deleted',
+          schoolName: existingSchool[0].name,
+        })
+
+        await notificationService.sendNotification({
+          title: 'School Removed',
+          message,
+          eventType: 'SCHOOL_REMOVED',
+          targetType: 'all',
+          metadata: {
+            schoolId: String(id),
+            schoolName: existingSchool[0].name,
+          },
+        })
+      } catch (notifyError) {
+        console.error('Failed to send school deletion notification:', notifyError)
+      }
 
       return { success: true, message: 'School deleted successfully' }
     }
@@ -147,13 +200,13 @@ export default function School() {
   const { schools, users } = useLoaderData()
   const actionData = useActionData()
   const submit = useSubmit()
-  const navigate = useNavigate()
 
   const [openDialog, setOpenDialog] = useState(false)
   const [dialogType, setDialogType] = useState('create')
   const [selectedSchool, setSelectedSchool] = useState(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [schoolToDelete, setSchoolToDelete] = useState(null)
+  const [selectedUserId, setSelectedUserId] = useState('')
 
   useEffect(() => {
     if (actionData) {
@@ -169,12 +222,14 @@ export default function School() {
   const handleCreateSchool = () => {
     setDialogType('create')
     setSelectedSchool(null)
+    setSelectedUserId(users[0]?.id?.toString() || '')
     setOpenDialog(true)
   }
 
   const handleEditSchool = (school) => {
     setDialogType('update')
     setSelectedSchool(school)
+    setSelectedUserId(school?.users_id?.toString() || '')
     setOpenDialog(true)
   }
 
@@ -365,6 +420,7 @@ export default function School() {
 
           <form onSubmit={handleSubmit}>
             <div className='grid gap-4 pb-4'>
+              <input type='hidden' name='users_id' value={selectedUserId} />
               <div className='grid gap-2'>
                 <label htmlFor='name'>School Name</label>
                 <Input
@@ -390,11 +446,8 @@ export default function School() {
               <div className='grid gap-2'>
                 <label htmlFor='users_id'>Associated User</label>
                 <Select
-                  name='users_id'
-                  defaultValue={
-                    selectedSchool?.users_id?.toString() ||
-                    users[0]?.id.toString()
-                  }
+                  value={selectedUserId}
+                  onValueChange={setSelectedUserId}
                 >
                   <SelectTrigger className='w-full'>
                     <SelectValue placeholder='Select a user' />

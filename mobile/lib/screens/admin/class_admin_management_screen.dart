@@ -29,7 +29,10 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
 
   Future<void> _fetchData() async {
     setState(() => _isLoading = true);
-    final result = await _classAdminService.getClassAdminsData();
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final result = await _classAdminService.getClassAdminsData(
+      schoolId: auth.user?.roleName == 'school_admin' ? auth.user?.schoolId : null,
+    );
     if (mounted) {
       setState(() {
         if (result['success']) {
@@ -56,7 +59,10 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final isSchoolAdmin = auth.user?.roleName == 'school_admin';
     if (isSchoolAdmin) {
-      selectedSchoolId = auth.user?.schoolId;
+      selectedSchoolId =
+          auth.user?.schoolId ??
+          (classAdmin?['school_id'] as int?) ??
+          (_schools.length == 1 ? _schools.first['id'] as int? : null);
     }
 
     showDialog(
@@ -87,13 +93,13 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
                 ),
                 if (!isSchoolAdmin)
                   DropdownButtonFormField<int>(
-                    value: selectedSchoolId,
+                    initialValue: selectedSchoolId,
                     decoration: const InputDecoration(labelText: 'School'),
                     items: _schools.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(value: s['id'], child: Text(s['name']))).toList(),
                     onChanged: (val) => setDialogState(() => selectedSchoolId = val),
                   ),
                 DropdownButtonFormField<int>(
-                  value: selectedClassId,
+                  initialValue: selectedClassId,
                   decoration: const InputDecoration(labelText: 'Class'),
                   items: _classes.map<DropdownMenuItem<int>>((c) => DropdownMenuItem(value: c['id'], child: Text(c['name']))).toList(),
                   onChanged: (val) => setDialogState(() => selectedClassId = val),
@@ -105,8 +111,10 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () async {
+                final navigator = Navigator.of(context);
+                final messenger = ScaffoldMessenger.of(context);
                 if (nameController.text.isEmpty || emailController.text.isEmpty || ( !isEditing && passwordController.text.isEmpty) || selectedClassId == null || selectedSchoolId == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
+                  messenger.showSnackBar(const SnackBar(content: Text('Please fill all fields')));
                   return;
                 }
 
@@ -120,14 +128,16 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
                 };
 
                 final result = await _classAdminService.saveClassAdmin(data, id: classAdmin?['id']);
-                if (mounted) {
-                  if (result['success']) {
-                    Navigator.pop(context);
-                    _fetchData();
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'])));
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
-                  }
+                if (!mounted) {
+                  return;
+                }
+
+                if (result['success']) {
+                  navigator.pop();
+                  _fetchData();
+                  messenger.showSnackBar(SnackBar(content: Text(result['message'])));
+                } else {
+                  messenger.showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6366F1), foregroundColor: Colors.white),
@@ -149,15 +159,19 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
             onPressed: () async {
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
               final result = await _classAdminService.deleteClassAdmin(ca['id'], ca['admin_id']);
-              if (mounted) {
-                Navigator.pop(context);
-                if (result['success']) {
-                  _fetchData();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted successfully')));
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
-                }
+              if (!mounted) {
+                return;
+              }
+
+              navigator.pop();
+              if (result['success']) {
+                _fetchData();
+                messenger.showSnackBar(const SnackBar(content: Text('Deleted successfully')));
+              } else {
+                messenger.showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
               }
             },
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -188,7 +202,7 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
                       child: ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: _classAdmins.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        separatorBuilder: (context, index) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
                           final ca = _classAdmins[index];
                           return Container(
@@ -197,12 +211,12 @@ class _ClassAdminManagementScreenState extends State<ClassAdminManagementScreen>
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(color: Colors.grey[200]!),
-                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+                              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
                             ),
                             child: Row(
                               children: [
                                 CircleAvatar(
-                                  backgroundColor: Colors.blue.withOpacity(0.1),
+                                  backgroundColor: Colors.blue.withValues(alpha: 0.1),
                                   child: Text(ca['admin_name'][0], style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
                                 ),
                                 const SizedBox(width: 16),

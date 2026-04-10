@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { json } from '@remix-run/node'
 import { useLoaderData, useActionData, useNavigation, useFetcher } from '@remix-run/react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,34 +10,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Bell, Send, CheckCircle, Clock, Users, Shield, GraduationCap, School } from 'lucide-react'
-import { db } from '@/lib/db'
+import { query } from '@/lib/db'
 import { getUser } from '@/lib/auth'
 import { formatDistanceToNow } from 'date-fns'
+import { getNotificationsForUser } from '@/services/notificationSchema.server'
 
 export async function loader({ request }) {
   const user = await getUser(request)
   if (!user) throw new Response('Unauthorized', { status: 401 })
 
-  // Fetch personal notifications
-  const notifications = await db.query(`
-    SELECT n.*, un.is_read, un.read_at
-    FROM notifications n
-    JOIN user_notifications un ON n.id = un.notification_id
-    WHERE un.user_id = ?
-    ORDER BY n.created_at DESC
-    LIMIT 100
-  `, [user.id])
+  const { notifications } = await getNotificationsForUser(user.id, 100)
 
   let adminData = {}
   if (user.role_name === 'super_admin') {
-    const schools = await db.query('SELECT id, name FROM schools ORDER BY name')
-    const classes = await db.query('SELECT id, name FROM classes ORDER BY name')
+    const schools = await query('SELECT id, name FROM schools ORDER BY name')
+    const classes = await query('SELECT id, name FROM classes ORDER BY name')
     adminData = { schools, classes }
   }
 
-  return new Response(JSON.stringify({ notifications, user, ...adminData }), {
-    headers: { 'Content-Type': 'application/json' }
-  })
+  return json({ notifications, user, ...adminData })
 }
 
 export async function action({ request }) {

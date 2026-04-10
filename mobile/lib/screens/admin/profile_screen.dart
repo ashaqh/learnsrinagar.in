@@ -35,7 +35,7 @@ class AdminProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              user.name ?? 'Administrator',
+              user.name,
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             Text(
@@ -48,7 +48,7 @@ class AdminProfileScreen extends StatelessWidget {
             _buildInfoCard(
               icon: LucideIcons.mail,
               label: 'Email',
-              value: user.email ?? 'N/A',
+              value: user.email,
             ),
             const SizedBox(height: 12),
             if (user.schoolId != null)

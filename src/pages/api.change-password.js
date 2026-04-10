@@ -22,27 +22,31 @@ export async function action({ request }) {
 
   try {
     const { currentPassword, newPassword, confirmPassword } = await request.json()
+    const normalizedConfirmPassword = confirmPassword ?? newPassword
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      return json({ success: false, message: "All fields are required" })
+    if (!currentPassword || !newPassword) {
+      return json(
+        { success: false, message: "Current password and new password are required" },
+        { status: 400 }
+      )
     }
 
-    if (newPassword !== confirmPassword) {
-      return json({ success: false, message: "New passwords do not match" })
+    if (newPassword !== normalizedConfirmPassword) {
+      return json({ success: false, message: "New passwords do not match" }, { status: 400 })
     }
 
     if (newPassword.length < 6) {
-      return json({ success: false, message: "Password must be at least 6 characters" })
+      return json({ success: false, message: "Password must be at least 6 characters" }, { status: 400 })
     }
 
     const users = await query('SELECT password_hash FROM users WHERE id = ?', [user.id])
     if (users.length === 0) {
-      return json({ success: false, message: "User not found" })
+      return json({ success: false, message: "User not found" }, { status: 404 })
     }
 
     const isCurrentValid = await bcrypt.compare(currentPassword, users[0].password_hash)
     if (!isCurrentValid) {
-      return json({ success: false, message: "Current password is incorrect" })
+      return json({ success: false, message: "Current password is incorrect" }, { status: 400 })
     }
 
     const salt = await bcrypt.genSalt(10)
@@ -53,6 +57,9 @@ export async function action({ request }) {
     return json({ success: true, message: "Password changed successfully" })
   } catch (error) {
     console.error("Change Password API Error:", error)
-    return json({ success: false, message: "An error occurred while changing password" })
+    return json(
+      { success: false, message: "An error occurred while changing password" },
+      { status: 500 }
+    )
   }
 }

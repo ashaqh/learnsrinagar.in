@@ -1,25 +1,51 @@
-import { query } from "@/lib/db";
-import admin from 'firebase-admin';
-import path from 'path';
-import { readFileSync } from 'fs';
+import { query, transaction } from '@/lib/db'
+import admin from 'firebase-admin'
+import path from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+
+import {
+  ensureNotificationSchema,
+  resolveNotificationRecipientIds,
+} from '@/services/notificationSchema.server'
 
 // Initialize Firebase Admin
 let firebaseApp;
+const currentFileDir = path.dirname(fileURLToPath(import.meta.url))
+
+function resolveServiceAccountPath() {
+  const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+  const candidatePaths = [
+    configuredPath,
+    path.resolve(process.cwd(), 'service-account.json'),
+    path.resolve(currentFileDir, '../../service-account.json'),
+  ].filter(Boolean)
+
+  const matchingPath = candidatePaths.find((candidatePath) => existsSync(candidatePath))
+  if (!matchingPath) {
+    throw new Error(
+      'Firebase service account file not found. Set FIREBASE_SERVICE_ACCOUNT_PATH or add service-account.json to the project root.'
+    )
+  }
+
+  return matchingPath
+}
+
 try {
   if (admin.apps.length === 0) {
-    const serviceAccountPath = path.resolve(process.cwd(), 'service-account.json');
-    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+    const serviceAccountPath = resolveServiceAccountPath()
+    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'))
     
     firebaseApp = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('Firebase Admin initialized successfully');
+    })
+    console.log('Firebase Admin initialized successfully')
   } else {
-    firebaseApp = admin.app();
-    console.log('Firebase Admin reused existing app');
+    firebaseApp = admin.app()
+    console.log('Firebase Admin reused existing app')
   }
 } catch (error) {
-  console.error('Firebase Admin failed to initialize:', error.message);
+  console.error('Firebase Admin failed to initialize:', error.message)
 }
 
 /**
@@ -36,6 +62,7 @@ class NotificationService {
    * @param {string} options.eventType - e.g., 'CLASS_SCHEDULED'
    * @param {string} options.targetType - 'all', 'role', 'group', or 'user'
    * @param {string|number} options.targetId - Optional ID for role, group, or user
+   * @param {Object} options.audienceContext - Optional recipient scoping metadata
    * @param {Object} options.metadata - Optional metadata (JSON)
    * @param {number} options.senderId - Optional user ID of the sender (admin)
    */
@@ -46,54 +73,80 @@ class NotificationService {
     eventType = null,
     targetType = 'all',
     targetId = null,
+    audienceContext = null,
     metadata = {},
     senderId = null
   }) {
     try {
-      // 1. Record in master notifications table
-      const res = await query(
-        `INSERT INTO notifications (title, message, type, event_type, target_type, target_id, metadata, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, message, type, eventType, targetType, targetId, JSON.stringify(metadata), senderId]
+      await ensureNotificationSchema()
+
+      const userIds = await resolveNotificationRecipientIds(
+        targetType,
+        targetId,
+        audienceContext ?? {}
       )
-      const notificationId = res.insertId;
 
-      // 2. Identify target users
-      let userIds = [];
-      if (targetType === 'all') {
-        const users = await query('SELECT id FROM users');
-        userIds = users.map(u => u.id);
-      } else if (targetType === 'role') {
-        const users = await query(
-          'SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id WHERE r.name = ?',
-          [targetId]
-        );
-        userIds = users.map(u => u.id);
-      } else if (targetType === 'school') {
-        const users = await query('SELECT id FROM users WHERE school_id = ?', [targetId]);
-        userIds = users.map(u => u.id);
-      } else if (targetType === 'class' || targetType === 'group') {
-        const users = await query('SELECT id FROM users WHERE class_id = ?', [targetId]);
-        userIds = users.map(u => u.id);
-      } else if (targetType === 'user') {
-        userIds = [targetId];
+      if (userIds.length === 0) {
+        return {
+          success: false,
+          message: 'No active users found for the selected target',
+        }
       }
 
-      // 3. Create delivery tracking for each user
-      if (userIds.length > 0) {
-        console.log(`Targeting ${userIds.length} users for notification: ${title}`);
-        const values = userIds.map(uid => `(${uid}, ${notificationId})`).join(',');
-        await query(`INSERT INTO user_notifications (user_id, notification_id) VALUES ${values}`);
+      console.log(`Targeting ${userIds.length} users for notification: ${title}`)
 
-        // 4. Send Push Notifications (FCM)
-        await this._sendPushNotifications(userIds, title, message, metadata);
-        return { success: true, notificationId, message: `Notification sent to ${userIds.length} users` };
+      let notificationId = null
+      await transaction(async (tx) => {
+        const insertResult = await tx(
+          `
+            INSERT INTO notifications (
+              title,
+              message,
+              type,
+              event_type,
+              target_type,
+              target_id,
+              metadata,
+              created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            title,
+            message,
+            type,
+            eventType,
+            targetType,
+            targetId,
+            JSON.stringify(metadata ?? {}),
+            senderId,
+          ]
+        )
+
+        notificationId = insertResult.insertId
+
+        const placeholders = userIds.map(() => '(?, ?, CURRENT_TIMESTAMP)').join(', ')
+        const params = userIds.flatMap((userId) => [userId, notificationId])
+
+        await tx(
+          `
+            INSERT INTO user_notifications (user_id, notification_id, delivered_at)
+            VALUES ${placeholders}
+          `,
+          params
+        )
+      })
+
+      await this._sendPushNotifications(userIds, title, message, metadata)
+
+      return {
+        success: true,
+        notificationId,
+        message: `Notification sent to ${userIds.length} users`,
       }
-
-      return { success: false, message: 'No active users found for the selected target' };
     } catch (error) {
-      console.error('NotificationService Error:', error);
-      return { success: false, message: error.message };
+      console.error('NotificationService Error:', error)
+      return { success: false, message: error.message }
     }
   }
 
@@ -101,51 +154,108 @@ class NotificationService {
    * Internal method to handle FCM delivery
    */
   async _sendPushNotifications(userIds, title, message, data) {
-    if (!firebaseApp) return;
+    if (!firebaseApp) {
+      console.warn('[NotificationService] Firebase Admin is not initialized. Push delivery skipped.')
+      return
+    }
 
     try {
+      await ensureNotificationSchema()
+
       // Get tokens for these users
-      console.log(`[NotificationService] Fetching tokens for ${userIds.length} users:`, userIds.slice(0, 10), userIds.length > 10 ? '...' : '');
-      const allTokens = await query('SELECT count(*) as count FROM device_tokens');
-      console.log(`[NotificationService] TOTAL tokens in DB: ${allTokens[0].count}`);
+      console.log(`[NotificationService] Fetching tokens for ${userIds.length} users:`, userIds.slice(0, 10), userIds.length > 10 ? '...' : '')
+      const allTokens = await query('SELECT count(*) as count FROM device_tokens')
+      console.log(`[NotificationService] TOTAL tokens in DB: ${allTokens[0].count}`)
       
       const tokenRows = await query(
-        `SELECT user_id, token FROM device_tokens WHERE user_id IN (?)`,
+        `SELECT id, user_id, token FROM device_tokens WHERE user_id IN (?)`,
         [userIds]
-      );
-      console.log(`[NotificationService] Raw tokenRows count: ${tokenRows.length}`);
+      )
+      console.log(`[NotificationService] Raw tokenRows count: ${tokenRows.length}`)
       if (tokenRows.length > 0) {
-        console.log(`[NotificationService] First few token matches:`, tokenRows.slice(0, 3).map(r => `user:${r.user_id}`));
+        console.log(`[NotificationService] First few token matches:`, tokenRows.slice(0, 3).map(r => `user:${r.user_id}`))
       }
 
-      const tokens = tokenRows.map(r => r.token);
-      console.log(`Sending to ${tokens.length} FCM tokens:`, tokens.map(t => t.substring(0, 10) + '...'));
+      const uniqueTokenRows = [...new Map(
+        tokenRows
+          .filter((row) => row.token)
+          .map((row) => [row.token, row])
+      ).values()]
+      const invalidTokenIds = new Set()
+      const batches = []
 
-      if (tokens.length === 0) return;
+      for (let start = 0; start < uniqueTokenRows.length; start += 500) {
+        batches.push(uniqueTokenRows.slice(start, start + 500))
+      }
 
-      const response = await admin.messaging().sendEachForMulticast({
-        tokens: tokens,
-        notification: { title, body: message },
-        android: {
-          priority: 'high',
-          notification: {
-            channelId: 'high_importance_channel',
-            sound: 'default',
+      console.log(
+        `Sending to ${uniqueTokenRows.length} FCM tokens in ${batches.length} batch(es):`,
+        uniqueTokenRows.map((row) => row.token.substring(0, 10) + '...')
+      )
+
+      if (uniqueTokenRows.length === 0) {
+        console.log('[NotificationService] No FCM tokens found for targeted users.')
+        return
+      }
+
+      let successCount = 0
+      let failureCount = 0
+
+      for (const batch of batches) {
+        const response = await admin.messaging(firebaseApp).sendEachForMulticast({
+          tokens: batch.map((row) => row.token),
+          notification: { title, body: message },
+          android: {
             priority: 'high',
-            clickAction: 'FLUTTER_NOTIFICATION_CLICK'
+            notification: {
+              channelId: 'high_importance_channel',
+              sound: 'default',
+              priority: 'high',
+              clickAction: 'FLUTTER_NOTIFICATION_CLICK'
+            }
+          },
+          data: {
+            ...Object.fromEntries(
+              Object.entries(data ?? {}).map(([key, value]) => [key, String(value)])
+            ),
+            click_action: 'FLUTTER_NOTIFICATION_CLICK'
           }
-        },
-        data: { 
-          ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
-          click_action: 'FLUTTER_NOTIFICATION_CLICK' 
-        }
-      });
-      
-      console.log(`FCM send successful: ${response.successCount} sent, ${response.failureCount} failed`);
+        })
+
+        successCount += response.successCount
+        failureCount += response.failureCount
+
+        response.responses.forEach((result, index) => {
+          if (result.success) return
+
+          const failedTokenRow = batch[index]
+          const errorCode = result.error?.code
+          console.error(
+            `[NotificationService] Failed FCM delivery for user ${failedTokenRow.user_id}: ${errorCode ?? result.error?.message ?? 'Unknown error'}`
+          )
+
+          if (
+            errorCode === 'messaging/invalid-registration-token' ||
+            errorCode === 'messaging/registration-token-not-registered'
+          ) {
+            invalidTokenIds.add(failedTokenRow.id)
+          }
+        })
+      }
+
+      if (invalidTokenIds.size > 0) {
+        const staleTokenIds = [...invalidTokenIds]
+        await query('DELETE FROM device_tokens WHERE id IN (?)', [staleTokenIds])
+        console.log(
+          `[NotificationService] Removed ${staleTokenIds.length} invalid FCM token(s) from device_tokens.`
+        )
+      }
+
+      console.log(`FCM send successful: ${successCount} sent, ${failureCount} failed`)
     } catch (error) {
-      console.error('FCM Send Error:', error);
+      console.error('FCM Send Error:', error)
     }
   }
 }
 
-export const notificationService = new NotificationService();
+export const notificationService = new NotificationService()

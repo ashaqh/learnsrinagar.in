@@ -1,36 +1,22 @@
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-console.log('🚀 Building and starting Remix application...');
+const currentDir = path.dirname(fileURLToPath(import.meta.url))
+const buildDir = path.join(currentDir, 'build')
+
+console.log('Building and starting Remix application...')
 
 try {
-  // Clean previous build
-  const buildDir = path.join(__dirname, 'build');
-  if (fs.existsSync(buildDir)) {
-    console.log('🧹 Cleaning previous build...');
-    fs.rmSync(buildDir, { recursive: true, force: true });
+  if (!existsSync(buildDir)) {
+    console.log('Build directory not found. Running production build...')
+    execSync('npm run build', { stdio: 'inherit' })
   }
 
-  // Install dependencies
-  console.log('📦 Installing dependencies...');
-  execSync('npm install', { stdio: 'inherit' });
-
-  // Build the application
-  console.log('🔨 Building application...');
-  execSync('npm run build', { stdio: 'inherit' });
-
-  // Check if build was successful
-  if (fs.existsSync(buildDir)) {
-    console.log('✅ Build successful!');
-    
-    // Start the application
-    console.log('🚀 Starting application...');
-    execSync('npm start', { stdio: 'inherit' });
-  } else {
-    throw new Error('Build directory not found');
-  }
+  console.log('Starting application...')
+  execSync('npm start', { stdio: 'inherit' })
 } catch (error) {
-  console.error('❌ Error:', error.message);
-  process.exit(1);
+  console.error('Startup error:', error.message)
+  process.exit(1)
 }

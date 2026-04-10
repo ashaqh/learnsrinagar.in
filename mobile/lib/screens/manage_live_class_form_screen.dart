@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/live_class_service.dart';
+import '../utils/live_class_datetime.dart';
 
 class ManageLiveClassFormScreen extends StatefulWidget {
   final Map<String, dynamic>? liveClass;
@@ -38,8 +39,20 @@ class _ManageLiveClassFormScreenState extends State<ManageLiveClassFormScreen> {
     _titleController = TextEditingController(text: widget.liveClass?['title'] ?? '');
     _topicController = TextEditingController(text: widget.liveClass?['topic_name'] ?? '');
     _linkController = TextEditingController(text: widget.liveClass?['youtube_live_link'] ?? '');
-    _startController = TextEditingController(text: widget.liveClass?['start_time']?.toString().replaceAll('Z', '').replaceAll('T', ' ').substring(0, 16) ?? '');
-    _endController = TextEditingController(text: widget.liveClass?['end_time']?.toString().replaceAll('Z', '').replaceAll('T', ' ').substring(0, 16) ?? '');
+    _startController = TextEditingController(
+      text: formatLiveClassDateTimeForText(
+        widget.liveClass?['start_time'],
+        pattern: 'yyyy-MM-dd HH:mm',
+        fallback: '',
+      ),
+    );
+    _endController = TextEditingController(
+      text: formatLiveClassDateTimeForText(
+        widget.liveClass?['end_time'],
+        pattern: 'yyyy-MM-dd HH:mm',
+        fallback: '',
+      ),
+    );
     
     _selectedClassId = widget.liveClass?['class_id'];
     _selectedSubjectId = widget.liveClass?['subject_id'];
@@ -112,7 +125,7 @@ class _ManageLiveClassFormScreenState extends State<ManageLiveClassFormScreen> {
               TextFormField(controller: _linkController, decoration: const InputDecoration(labelText: 'YouTube Live Link *'), validator: (v) => v!.isEmpty ? 'Required' : null),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _sessionType,
+                initialValue: _sessionType,
                 decoration: const InputDecoration(labelText: 'Session Type'),
                 items: const [
                   DropdownMenuItem(value: 'subject_specific', child: Text('Subject-Specific')),
@@ -125,14 +138,14 @@ class _ManageLiveClassFormScreenState extends State<ManageLiveClassFormScreen> {
               const SizedBox(height: 16),
               if (_sessionType == 'subject_specific')
                 DropdownButtonFormField<int>(
-                  value: _selectedSubjectId,
+                  initialValue: _selectedSubjectId,
                   decoration: const InputDecoration(labelText: 'Subject'),
                   items: _subjects.map((s) => DropdownMenuItem<int>(value: s['id'], child: Text(s['name']))).toList(),
                   onChanged: (v) => setState(() => _selectedSubjectId = v),
                 ),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
-                value: _selectedClassId,
+                initialValue: _selectedClassId,
                 decoration: const InputDecoration(labelText: 'Class *'),
                 items: _classes.map((c) => DropdownMenuItem<int>(value: c['id'], child: Text(c['name']))).toList(),
                 onChanged: (v) => setState(() => _selectedClassId = v),
@@ -146,7 +159,7 @@ class _ManageLiveClassFormScreenState extends State<ManageLiveClassFormScreen> {
               ),
               if (!_isAllSchools)
                 DropdownButtonFormField<dynamic>(
-                  value: _selectedSchoolId,
+                  initialValue: _selectedSchoolId,
                   decoration: const InputDecoration(labelText: 'School'),
                   items: _schools.map((s) => DropdownMenuItem<dynamic>(value: s['id'], child: Text(s['name']))).toList(),
                   onChanged: (v) => setState(() => _selectedSchoolId = v),

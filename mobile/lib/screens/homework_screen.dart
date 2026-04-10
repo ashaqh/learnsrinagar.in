@@ -308,6 +308,8 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
           ElevatedButton(
             onPressed: () async {
               if (titleController.text.isEmpty || widget.classId == null) return;
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
               final auth =
                   Provider.of<AuthProvider>(context, listen: false);
               final result = await _homeworkService.createHomework(
@@ -318,12 +320,11 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
                 descController.text,
                 DateTime.now().toString().split(' ')[0],
               );
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(result['message'])));
-                _fetchHomework();
-              }
+              if (!mounted) return;
+              navigator.pop();
+              messenger.showSnackBar(
+                  SnackBar(content: Text(result['message'])));
+              _fetchHomework();
             },
             child: const Text('Create'),
           ),

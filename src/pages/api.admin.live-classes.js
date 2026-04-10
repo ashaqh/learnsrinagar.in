@@ -3,6 +3,11 @@ import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
 import { notificationService } from "@/services/notificationService.server"
 import { getLiveClassNotification } from "@/services/notificationHelper.server"
+import {
+  calculateLiveClassStatus,
+  formatLiveClassDateTimeForDb,
+  normalizeLiveClassRecords,
+} from "@/lib/liveClassDateTime"
 
 async function authorize(request) {
   const authHeader = request.headers.get("Authorization")
@@ -10,20 +15,6 @@ async function authorize(request) {
   const token = authHeader.split(" ")[1]
   const user = verifyToken(token)
   return user
-}
-
-const calculateStatus = (startTime, endTime) => {
-  if (!startTime) return 'upcoming'
-  
-  const now = new Date()
-  const start = new Date(startTime)
-  const end = endTime ? new Date(endTime) : null
-  
-  if (now < start) return 'upcoming'
-  if (end && now > end) return 'completed'
-  if (now >= start && (!end || now <= end)) return 'live'
-  
-  return 'upcoming'
 }
 
 export async function loader({ request }) {
@@ -82,7 +73,16 @@ export async function loader({ request }) {
       `, [user.id])
     }
 
-    return json({ success: true, data: { liveClasses, schools, classes, subjects, teachers } })
+    return json({
+      success: true,
+      data: {
+        liveClasses: normalizeLiveClassRecords(liveClasses),
+        schools,
+        classes,
+        subjects,
+        teachers,
+      },
+    })
   } catch (error) {
     return json({ success: false, message: error.message }, { status: 500 })
   }
@@ -106,12 +106,28 @@ export async function action({ request }) {
     if (method === 'POST') {
       const { title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools, start_time, end_time } = data
       
-      const status = calculateStatus(start_time, end_time)
+      const normalizedStartTime = formatLiveClassDateTimeForDb(start_time)
+      const normalizedEndTime = formatLiveClassDateTimeForDb(end_time)
+      const status = calculateLiveClassStatus(normalizedStartTime, normalizedEndTime)
 
       await query(
         `INSERT INTO live_classes (title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools, start_time, end_time, status, created_by_role)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id || user.id, school_id, is_all_schools ? 1 : 0, start_time, end_time, status, user.role_name]
+        [
+          title,
+          youtube_live_link,
+          session_type,
+          topic_name,
+          subject_id,
+          class_id,
+          teacher_id || user.id,
+          school_id,
+          is_all_schools ? 1 : 0,
+          normalizedStartTime,
+          normalizedEndTime,
+          status,
+          user.role_name,
+        ]
       )
 
       // Trigger Notification
@@ -120,7 +136,7 @@ export async function action({ request }) {
           topic_name,
           class_id,
           teacher_id: teacher_id || user.id,
-          start_time
+          start_time: normalizedStartTime,
         });
 
         await notificationService.sendNotification({
@@ -129,7 +145,8 @@ export async function action({ request }) {
           eventType: 'CLASS_SCHEDULED',
           targetType: is_all_schools ? 'all' : 'group',
           targetId: is_all_schools ? null : class_id,
-          metadata: { topic: topic_name, startTime: start_time, title: title }
+          audienceContext: is_all_schools ? null : { schoolId: school_id },
+          metadata: { topic: topic_name, startTime: normalizedStartTime, title: title }
         });
       } catch (notifyError) {
         console.error('Failed to send live class notification:', notifyError);
@@ -141,13 +158,29 @@ export async function action({ request }) {
     if (method === 'PUT') {
       const { id, title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools, start_time, end_time } = data
       
-      const status = calculateStatus(start_time, end_time)
+      const normalizedStartTime = formatLiveClassDateTimeForDb(start_time)
+      const normalizedEndTime = formatLiveClassDateTimeForDb(end_time)
+      const status = calculateLiveClassStatus(normalizedStartTime, normalizedEndTime)
 
       await query(
         `UPDATE live_classes 
          SET title = ?, youtube_live_link = ?, session_type = ?, topic_name = ?, subject_id = ?, class_id = ?, teacher_id = ?, school_id = ?, is_all_schools = ?, start_time = ?, end_time = ?, status = ?
          WHERE id = ?`,
-        [title, youtube_live_link, session_type, topic_name, subject_id, class_id, teacher_id, school_id, is_all_schools ? 1 : 0, start_time, end_time, status, id]
+        [
+          title,
+          youtube_live_link,
+          session_type,
+          topic_name,
+          subject_id,
+          class_id,
+          teacher_id,
+          school_id,
+          is_all_schools ? 1 : 0,
+          normalizedStartTime,
+          normalizedEndTime,
+          status,
+          id,
+        ]
       )
       return json({ success: true, message: 'Live class updated successfully' })
     }

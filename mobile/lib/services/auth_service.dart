@@ -36,7 +36,12 @@ class AuthService {
     }
   }
 
-  Future<Map<String, dynamic>> changePassword(String currentPassword, String newPassword, String token) async {
+  Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+    String confirmPassword,
+    String token,
+  ) async {
     try {
       final response = await http.post(
         Uri.parse('${AppConfig.apiBaseUrl}/change-password'),
@@ -47,17 +52,21 @@ class AuthService {
         body: jsonEncode({
           'currentPassword': currentPassword,
           'newPassword': newPassword,
+          'confirmPassword': confirmPassword,
         }),
       );
 
       final data = jsonDecode(response.body);
 
-      if (response.statusCode == 200) {
-        return {'success': true};
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Password changed successfully',
+        };
       } else {
         return {
           'success': false,
-          'message': data['error'] ?? 'Failed to change password',
+          'message': data['message'] ?? data['error'] ?? 'Failed to change password',
         };
       }
     } catch (e) {

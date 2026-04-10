@@ -1,6 +1,10 @@
 import { json } from "@remix-run/node"
 import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
+import {
+  formatLiveClassDateTimeForDb,
+  normalizeLiveClassRecords,
+} from "@/lib/liveClassDateTime"
 
 export async function loader({ request }) {
   const authHeader = request.headers.get("Authorization")
@@ -65,7 +69,7 @@ export async function loader({ request }) {
       )
     }
 
-    return json({ liveClasses: liveClasses || [] })
+    return json({ liveClasses: normalizeLiveClassRecords(liveClasses || []) })
   } catch (error) {
     console.error("Error in api.live_classes.js:", error);
     return json({ error: "Internal server error", message: error.message }, { status: 500 })
@@ -87,11 +91,13 @@ export async function action({ request }) {
 
   try {
     const { classId, subjectId, title, youtubeUrl, startTime, endTime } = await request.json()
+    const normalizedStartTime = formatLiveClassDateTimeForDb(startTime)
+    const normalizedEndTime = formatLiveClassDateTimeForDb(endTime)
     
     await query(
       `INSERT INTO live_classes (class_id, subject_id, teacher_id, title, youtube_url, start_time, end_time) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [classId, subjectId, user.id, title, youtubeUrl, startTime, endTime]
+      [classId, subjectId, user.id, title, youtubeUrl, normalizedStartTime, normalizedEndTime]
     )
 
     return json({ success: true, message: "Live class scheduled successfully" })

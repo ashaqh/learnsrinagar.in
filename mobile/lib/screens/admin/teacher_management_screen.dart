@@ -130,7 +130,7 @@ class _TeacherManagementScreenState extends State<TeacherManagementScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<int>(
-                value: selectedClassId,
+                initialValue: selectedClassId,
                 decoration: const InputDecoration(labelText: 'Select Class'),
                 items: _classes.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
                 onChanged: (val) {
@@ -143,7 +143,7 @@ class _TeacherManagementScreenState extends State<TeacherManagementScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
-                value: selectedSubjectId,
+                initialValue: selectedSubjectId,
                 decoration: const InputDecoration(labelText: 'Select Subject'),
                 items: filteredSubjects.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList(),
                 onChanged: selectedClassId == null ? null : (val) => setDialogState(() => selectedSubjectId = val),

@@ -134,7 +134,7 @@ class _ManageBlogFormScreenState extends State<ManageBlogFormScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
-                value: _selectedCategoryId,
+                initialValue: _selectedCategoryId,
                 decoration: _inputDecoration('Category', LucideIcons.tag),
                 items: _categories.map((c) => DropdownMenuItem<int>(value: c['id'], child: Text(c['name']))).toList(),
                 onChanged: (v) => setState(() => _selectedCategoryId = v),

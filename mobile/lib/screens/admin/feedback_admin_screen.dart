@@ -116,7 +116,7 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<int>(
-                    value: _selectedSchoolId,
+                    initialValue: _selectedSchoolId,
                     decoration: const InputDecoration(
                       labelText: 'School',
                       prefixIcon: Icon(LucideIcons.school, size: 18),
@@ -138,7 +138,7 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<int>(
-                    value: _selectedClassId,
+                    initialValue: _selectedClassId,
                     decoration: const InputDecoration(
                       labelText: 'Class',
                       prefixIcon: Icon(LucideIcons.book_open, size: 18),
@@ -215,7 +215,7 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, size: 20, color: color),
@@ -302,7 +302,7 @@ class _FeedbackAdminScreenState extends State<FeedbackAdminScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: _getSectionColor(item['section']).withOpacity(0.1),
+                            color: _getSectionColor(item['section']).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(

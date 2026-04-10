@@ -66,7 +66,7 @@ class _SchoolManagementScreenState extends State<SchoolManagementScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int?>(
-                  value: selectedAdminId,
+                  initialValue: selectedAdminId,
                   decoration: const InputDecoration(labelText: 'Assigned Admin'),
                   hint: const Text('Select an Admin'),
                   items: [
@@ -85,8 +85,10 @@ class _SchoolManagementScreenState extends State<SchoolManagementScreen> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () async {
+                final navigator = Navigator.of(context);
+                final messenger = ScaffoldMessenger.of(context);
                 if (nameController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name is required')));
+                  messenger.showSnackBar(const SnackBar(content: Text('Name is required')));
                   return;
                 }
                 
@@ -94,14 +96,16 @@ class _SchoolManagementScreenState extends State<SchoolManagementScreen> {
                     ? await _adminService.createSchool(nameController.text, addressController.text, selectedAdminId)
                     : await _adminService.updateSchool(school.id, nameController.text, addressController.text, selectedAdminId);
                 
-                if (mounted) {
-                  if (result['success']) {
-                    Navigator.pop(context);
-                    _fetchData();
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'])));
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
-                  }
+                if (!mounted) {
+                  return;
+                }
+
+                if (result['success']) {
+                  navigator.pop();
+                  _fetchData();
+                  messenger.showSnackBar(SnackBar(content: Text(result['message'])));
+                } else {
+                  messenger.showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
                 }
               },
               child: Text(school == null ? 'Create' : 'Save'),
@@ -126,14 +130,17 @@ class _SchoolManagementScreenState extends State<SchoolManagementScreen> {
     );
 
     if (confirm == true) {
+      final messenger = ScaffoldMessenger.of(context);
       final result = await _adminService.deleteSchool(school.id);
-      if (mounted) {
-        if (result['success']) {
-          _fetchData();
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'])));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
-        }
+      if (!mounted) {
+        return;
+      }
+
+      if (result['success']) {
+        _fetchData();
+        messenger.showSnackBar(SnackBar(content: Text(result['message'])));
+      } else {
+        messenger.showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: Colors.red));
       }
     }
   }

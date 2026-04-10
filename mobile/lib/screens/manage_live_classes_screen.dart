@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/live_class_service.dart';
 import 'manage_live_class_form_screen.dart';
+import '../utils/live_class_datetime.dart';
 
 class ManageLiveClassesScreen extends StatefulWidget {
   const ManageLiveClassesScreen({super.key});
@@ -91,7 +92,10 @@ class _ManageLiveClassesScreenState extends State<ManageLiveClassesScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('${lc['class_name']} • ${lc['subject_name'] ?? 'General'}'),
-                              Text('Start: ${lc['start_time']?.toString().split('T')[0]} ${lc['start_time']?.toString().split('T')[1].substring(0, 5)}', style: const TextStyle(fontSize: 11)),
+                              Text(
+                                'Start: ${formatLiveClassDateTimeForText(lc['start_time'], pattern: 'yyyy-MM-dd HH:mm', fallback: '--')}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
                             ],
                           ),
                           trailing: Row(

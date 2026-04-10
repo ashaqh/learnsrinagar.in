@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../services/live_class_service.dart';
-import 'package:intl/intl.dart';
+import '../utils/live_class_datetime.dart';
 
 class LiveClassScreen extends StatefulWidget {
   final int? classId;
@@ -86,22 +86,16 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
 
   // Generate updated live classes dynamically based on current time
   List<dynamic> get _updatedLiveClasses {
-    final now = DateTime.now();
     return _liveClasses.map((lc) {
       if (lc['start_time'] == null) return lc;
-      
-      final start = DateTime.parse(lc['start_time']).toLocal();
-      final end = lc['end_time'] != null ? DateTime.parse(lc['end_time']).toLocal() : null;
-      
-      String status = lc['status'] ?? 'scheduled';
-      if (now.isBefore(start)) {
-        status = 'upcoming';
-      } else if (end != null && now.isAfter(end)) {
-        status = 'completed';
-      } else if (now.isAfter(start) && (end == null || now.isBefore(end))) {
-        status = 'live';
-      }
-      return {...lc, 'computed_status': status};
+
+      return {
+        ...lc,
+        'computed_status': calculateLiveClassStatus(
+          lc['start_time'],
+          lc['end_time'],
+        ),
+      };
     }).toList();
   }
 
@@ -316,7 +310,7 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
                       filled: true,
                       fillColor: Colors.grey[50],
                     ),
-                    value: _selectedSubject,
+                    initialValue: _selectedSubject,
                     isExpanded: true,
                     items: [
                       const DropdownMenuItem(value: 'all', child: Text('All Subjects', style: TextStyle(fontSize: 14))),
@@ -348,7 +342,7 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
                       filled: true,
                       fillColor: Colors.grey[50],
                     ),
-                    value: _selectedStatus,
+                    initialValue: _selectedStatus,
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Status', style: TextStyle(fontSize: 14))),
                       DropdownMenuItem(value: 'live', child: Text('Live Now', style: TextStyle(fontSize: 14))),
@@ -548,7 +542,10 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
                       Text('Starts: ', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.grey[800])),
                       Expanded(
                         child: Text(
-                          DateFormat('MMM dd, yyyy - hh:mm a').format(DateTime.parse(item['start_time']).toLocal()), 
+                          formatLiveClassDateTimeForText(
+                            item['start_time'],
+                            pattern: 'MMM dd, yyyy - hh:mm a',
+                          ),
                           style: TextStyle(fontSize: 14, color: Colors.blue[700], fontWeight: FontWeight.w500), 
                           overflow: TextOverflow.ellipsis
                         ),

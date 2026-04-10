@@ -32,6 +32,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     final result = await _authService.changePassword(
       _currentPasswordController.text,
       _newPasswordController.text,
+      _confirmPasswordController.text,
       authProvider.token!,
     );
 

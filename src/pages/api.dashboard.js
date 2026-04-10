@@ -1,6 +1,10 @@
 import { json } from "@remix-run/node"
 import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
+import {
+  calculateLiveClassStatus,
+  normalizeLiveClassRecords,
+} from "@/lib/liveClassDateTime"
 
 async function buildLearnerDashboardData({
   activeStudentId,
@@ -109,19 +113,14 @@ async function buildTeacherDashboardData({ teacherId, from, to }) {
 
   const resolveTeacherLiveClassStatus = (liveClass) => {
     const normalizedStatus = String(liveClass?.status || '').toLowerCase()
-    const startTime = parseTeacherDashboardDate(liveClass?.start_time)
-    const endTime = parseTeacherDashboardDate(liveClass?.end_time)
-    const now = new Date()
 
     if (normalizedStatus === 'cancelled') return 'cancelled'
     if (normalizedStatus === 'completed') return 'completed'
-    if (['scheduled', 'upcoming', 'live'].includes(normalizedStatus)) {
-      return 'scheduled'
-    }
-    if (endTime && endTime < now) return 'completed'
-    if (startTime && startTime > now) return 'scheduled'
-    if (startTime && startTime <= now) return 'completed'
-    return 'scheduled'
+
+    return calculateLiveClassStatus(liveClass?.start_time, liveClass?.end_time) ===
+      'completed'
+      ? 'completed'
+      : 'scheduled'
   }
 
   let teacherHomeworkQuery = `
@@ -182,9 +181,11 @@ async function buildTeacherDashboardData({ teacherId, from, to }) {
   }
 
   teacherTimetableQuery += ` ORDER BY lc.start_time DESC`
-  const teacherLiveClasses = await query(
+  const teacherLiveClasses = normalizeLiveClassRecords(
+    await query(
     teacherTimetableQuery,
     teacherTimetableParams
+  )
   )
 
   data.teacherTimetable = teacherLiveClasses

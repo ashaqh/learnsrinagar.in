@@ -84,15 +84,17 @@ class _SchoolAdminScreenState extends State<SchoolAdminScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
               if (nameController.text.isEmpty || emailController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   const SnackBar(content: Text('Please fill in all required fields')),
                 );
                 return;
               }
 
               if (user == null && passwordController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   const SnackBar(content: Text('Password is required for new accounts')),
                 );
                 return;
@@ -113,21 +115,23 @@ class _SchoolAdminScreenState extends State<SchoolAdminScreen> {
                       2,
                     );
 
-              if (mounted) {
-                if (result['success']) {
-                  Navigator.pop(context);
-                  _fetchUsers();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(result['message'])),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(result['message']),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
+              if (!mounted) {
+                return;
+              }
+
+              if (result['success']) {
+                navigator.pop();
+                _fetchUsers();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(result['message'])),
+                );
+              } else {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(result['message']),
+                    backgroundColor: Colors.red,
+                  ),
+                );
               }
             },
             child: Text(user == null ? 'Create' : 'Save'),
@@ -157,21 +161,24 @@ class _SchoolAdminScreenState extends State<SchoolAdminScreen> {
     );
 
     if (confirm == true) {
+      final messenger = ScaffoldMessenger.of(context);
       final result = await _adminService.deleteUser(user.id);
-      if (mounted) {
-        if (result['success']) {
-          _fetchUsers();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(result['message'])),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message']),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+      if (!mounted) {
+        return;
+      }
+
+      if (result['success']) {
+        _fetchUsers();
+        messenger.showSnackBar(
+          SnackBar(content: Text(result['message'])),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(result['message']),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -208,7 +215,7 @@ class _SchoolAdminScreenState extends State<SchoolAdminScreen> {
                       return Card(
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                            backgroundColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                             child: Icon(Icons.person, color: Theme.of(context).primaryColor),
                           ),
                           title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),

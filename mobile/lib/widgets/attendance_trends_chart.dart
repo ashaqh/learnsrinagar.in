@@ -75,7 +75,7 @@ class AttendanceTrendsChart extends StatelessWidget {
               dotData: const FlDotData(show: true),
               belowBarData: BarAreaData(
                 show: true,
-                color: Colors.teal.withOpacity(0.1),
+                color: Colors.teal.withValues(alpha: 0.1),
               ),
             ),
             LineChartBarData(

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import bcrypt from 'bcryptjs'
-import { query } from '@/lib/db'
+import { query, transaction } from '@/lib/db'
 import { getUser } from '@/lib/auth'
 import {
   useLoaderData,
   useSubmit,
-  useNavigate,
   useActionData,
 } from '@remix-run/react'
 import { toast } from 'sonner'
@@ -53,16 +52,38 @@ import {
   TableCell,
 } from '@/components/ui/table'
 
+async function resolveEffectiveSchoolId(user) {
+  if (user?.role_name !== 'school_admin') {
+    return user?.school_id || null
+  }
+
+  if (user.school_id) {
+    return user.school_id
+  }
+
+  const schools = await query(
+    'SELECT id FROM schools WHERE users_id = ? LIMIT 1',
+    [user.id]
+  )
+
+  return schools[0]?.id || null
+}
+
 export async function loader({ request }) {
   const user = await getUser(request)
+  const schoolId = await resolveEffectiveSchoolId(user)
 
   const users = await query('SELECT id, name FROM users WHERE role_id = ?', [
     3,
   ])
-  // Schools are retrieved but only for displaying existing assignments
-  const schools = await query('SELECT id, name FROM schools')
-  const classes = await query('SELECT id, name FROM classes')
-  const classAdmins = await query(`
+  const schools = schoolId
+    ? await query('SELECT id, name FROM schools WHERE id = ?', [schoolId])
+    : await query('SELECT id, name FROM schools')
+  const classes = schoolId
+    ? await query('SELECT id, name FROM classes WHERE school_id = ?', [schoolId])
+    : await query('SELECT id, name FROM classes')
+
+  let classAdminsSql = `
     SELECT ca.id,
            ca.admin_id,
            ca.school_id,
@@ -76,7 +97,15 @@ export async function loader({ request }) {
     JOIN users u   ON ca.admin_id  = u.id
     JOIN schools s ON ca.school_id = s.id
     JOIN classes c ON ca.class_id  = c.id
-  `)
+  `
+  const classAdminParams = []
+
+  if (schoolId) {
+    classAdminsSql += ' WHERE ca.school_id = ?'
+    classAdminParams.push(schoolId)
+  }
+
+  const classAdmins = await query(classAdminsSql, classAdminParams)
 
   return { users, schools, classes, classAdmins, user }
 }
@@ -91,8 +120,16 @@ export async function action({ request }) {
       const name = formData.get('name')
       const email = formData.get('email')
       const password = formData.get('password')
-      const school_id = user.school_id // Get school_id from logged-in user
+      const school_id = await resolveEffectiveSchoolId(user)
       const class_id = formData.get('class_id')
+      let admin_id = null
+
+      if (!school_id) {
+        return {
+          success: false,
+          message: 'Your account is not linked to a school yet.',
+        }
+      }
 
       try {
         // Check if email exists
@@ -106,36 +143,61 @@ export async function action({ request }) {
           }
         }
 
-        // Start transaction
-        await query('START TRANSACTION')
+        // Use transaction helper
+        await transaction(async (q) => {
+          // Create user
+          const salt = await bcrypt.genSalt(10)
+          const password_hash = await bcrypt.hash(password, salt)
+          const result = await q(
+            'INSERT INTO users (name, email, password_hash, role_id) VALUES (?, ?, ?, 3)',
+            [name, email, password_hash]
+          )
 
-        // Create user
-        const salt = await bcrypt.genSalt(10)
-        const password_hash = await bcrypt.hash(password, salt)
-        const result = await query(
-          'INSERT INTO users (name, email, password_hash, role_id) VALUES (?, ?, ?, 3)',
-          [name, email, password_hash]
-        )
+          // Get the inserted ID
+          admin_id = result.insertId
 
-        // Get the inserted ID
-        const admin_id = result.insertId
+          // Create class admin assignment
+          await q(
+            'INSERT INTO class_admins (admin_id, school_id, class_id) VALUES (?, ?, ?)',
+            [admin_id, school_id, class_id]
+          )
+        })
 
-        // Create class admin assignment
-        await query(
-          'INSERT INTO class_admins (admin_id, school_id, class_id) VALUES (?, ?, ?)',
-          [admin_id, school_id, class_id]
-        )
+        try {
+          const { notificationService } = await import('@/services/notificationService.server')
+          const { getClassAdminLifecycleNotification } = await import(
+            '@/services/notificationHelper.server'
+          )
+          const message = await getClassAdminLifecycleNotification({
+            action: 'created',
+            adminName: name,
+            classId: class_id,
+            schoolId: school_id,
+          })
 
-        // Commit the transaction
-        await query('COMMIT')
+          await notificationService.sendNotification({
+            title: 'New Class Admin Assigned',
+            message,
+            eventType: 'CLASS_ADMIN_ASSIGNED',
+            targetType: 'school',
+            targetId: school_id,
+            metadata: {
+              adminId: admin_id,
+              adminName: name,
+              classId: String(class_id),
+              schoolId: String(school_id),
+            },
+            senderId: user?.id,
+          })
+        } catch (notifyError) {
+          console.error('Failed to send class admin creation notification:', notifyError)
+        }
 
         return {
           success: true,
           message: 'Class admin created and assigned successfully',
         }
       } catch (err) {
-        // Rollback on error
-        await query('ROLLBACK')
         throw err
       }
     }
@@ -145,8 +207,15 @@ export async function action({ request }) {
       const name = formData.get('name')
       const email = formData.get('email')
       const password = formData.get('password')
-      const school_id = user.school_id // Get school_id from logged-in user
+      const school_id = await resolveEffectiveSchoolId(user)
       const class_id = formData.get('class_id')
+
+      if (!school_id) {
+        return {
+          success: false,
+          message: 'Your account is not linked to a school yet.',
+        }
+      }
 
       // Find the admin_id associated with this assignment
       const currentAssignment = await query(
@@ -174,61 +243,111 @@ export async function action({ request }) {
       }
 
       try {
-        // Start transaction
-        await query('START TRANSACTION')
+        // Use transaction helper
+        await transaction(async (q) => {
+          // Update user details
+          if (password && password.trim() !== '') {
+            // Update with new password
+            const salt = await bcrypt.genSalt(10)
+            const password_hash = await bcrypt.hash(password, salt)
+            await q(
+              `UPDATE users SET name = ?, email = ?, password_hash = ? WHERE id = ?`,
+              [name, email, password_hash, admin_id]
+            )
+          } else {
+            // Update without changing password
+            await q(`UPDATE users SET name = ?, email = ? WHERE id = ?`, [
+              name,
+              email,
+              admin_id,
+            ])
+          }
 
-        // Update user details
-        if (password && password.trim() !== '') {
-          // Update with new password
-          const salt = await bcrypt.genSalt(10)
-          const password_hash = await bcrypt.hash(password, salt)
-          await query(
-            `UPDATE users SET name = ?, email = ?, password_hash = ? WHERE id = ?`,
-            [name, email, password_hash, admin_id]
+          // Update class assignment
+          const exists = await q(
+            `SELECT id
+             FROM class_admins
+             WHERE admin_id = ? AND school_id = ? AND class_id = ? AND id != ?`,
+            [admin_id, school_id, class_id, id]
           )
-        } else {
-          // Update without changing password
-          await query(`UPDATE users SET name = ?, email = ? WHERE id = ?`, [
-            name,
-            email,
-            admin_id,
-          ])
-        }
 
-        // Update class assignment
-        const exists = await query(
-          `SELECT id
-           FROM class_admins
-           WHERE admin_id = ? AND school_id = ? AND class_id = ? AND id != ?`,
-          [admin_id, school_id, class_id, id]
-        )
+          if (exists.length > 0) {
+            throw new Error('This assignment already exists.')
+          }
 
-        if (exists.length > 0) {
-          await query('ROLLBACK')
-          return { success: false, message: 'This assignment already exists.' }
-        }
+          await q(
+            `UPDATE class_admins
+             SET school_id = ?, class_id = ?
+             WHERE id = ?`,
+            [school_id, class_id, id]
+          )
+        })
 
-        await query(
-          `UPDATE class_admins
-           SET school_id = ?, class_id = ?
-           WHERE id = ?`,
-          [school_id, class_id, id]
-        )
-
-        await query('COMMIT')
         return {
           success: true,
           message: 'Class admin updated successfully',
         }
       } catch (err) {
-        await query('ROLLBACK')
         throw err
       }
     }
 
     if (action === 'delete') {
       const id = formData.get('id')
+      const existingAssignment = await query(
+        `
+          SELECT ca.school_id, ca.class_id, u.name AS admin_name
+          FROM class_admins ca
+          JOIN users u ON ca.admin_id = u.id
+          WHERE ca.id = ?
+        `,
+        [id]
+      )
+
+      if (existingAssignment.length === 0) {
+        return { success: false, message: 'Assignment not found' }
+      }
+
+      const schoolId = await resolveEffectiveSchoolId(user)
+      if (
+        schoolId &&
+        String(existingAssignment[0].school_id) !== String(schoolId)
+      ) {
+        return { success: false, message: 'You can only manage your school.' }
+      }
+
       await query('DELETE FROM class_admins WHERE id = ?', [id])
+
+      try {
+        const { notificationService } = await import('@/services/notificationService.server')
+        const { getClassAdminLifecycleNotification } = await import(
+          '@/services/notificationHelper.server'
+        )
+        const assignment = existingAssignment[0]
+        const message = await getClassAdminLifecycleNotification({
+          action: 'deleted',
+          adminName: assignment.admin_name,
+          classId: assignment.class_id,
+          schoolId: assignment.school_id,
+        })
+
+        await notificationService.sendNotification({
+          title: 'Class Admin Removed',
+          message,
+          eventType: 'CLASS_ADMIN_REMOVED',
+          targetType: 'school',
+          targetId: assignment.school_id,
+          metadata: {
+            adminName: assignment.admin_name,
+            classId: String(assignment.class_id),
+            schoolId: String(assignment.school_id),
+          },
+          senderId: user?.id,
+        })
+      } catch (notifyError) {
+        console.error('Failed to send class admin deletion notification:', notifyError)
+      }
+
       return {
         success: true,
         message: 'Class admin assignment deleted successfully',
@@ -245,13 +364,13 @@ export default function ClassAdmin() {
   const { users, schools, classes, classAdmins } = useLoaderData()
   const actionData = useActionData()
   const submit = useSubmit()
-  const navigate = useNavigate()
 
   const [openDialog, setOpenDialog] = useState(false)
   const [dialogType, setDialogType] = useState('create')
   const [selected, setSelected] = useState(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [toDelete, setToDelete] = useState(null)
+  const [selectedClassId, setSelectedClassId] = useState('')
 
   useEffect(() => {
     if (actionData) {
@@ -267,11 +386,13 @@ export default function ClassAdmin() {
   const handleCreate = () => {
     setDialogType('create')
     setSelected(null)
+    setSelectedClassId(classes[0]?.id?.toString() || '')
     setOpenDialog(true)
   }
   const handleEdit = (assignment) => {
     setDialogType('update')
     setSelected(assignment)
+    setSelectedClassId(assignment?.class_id?.toString() || '')
     setOpenDialog(true)
   }
   const openDelete = (assignment) => {
@@ -446,6 +567,7 @@ export default function ClassAdmin() {
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className='grid gap-4 pb-4'>
+              <input type='hidden' name='class_id' value={selectedClassId} />
               {dialogType === 'create' && (
                 <>
                   <div className='grid gap-2'>
@@ -516,11 +638,8 @@ export default function ClassAdmin() {
               <div className='grid gap-2'>
                 <label htmlFor='class_id'>Class</label>
                 <Select
-                  name='class_id'
-                  defaultValue={
-                    selected?.class_id?.toString() || classes[0]?.id.toString()
-                  }
-                  required
+                  value={selectedClassId}
+                  onValueChange={setSelectedClassId}
                 >
                   <SelectTrigger className='w-full'>
                     <SelectValue placeholder='Select a class' />

@@ -1,6 +1,8 @@
 import { json } from "@remix-run/node"
 import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
+import { notificationService } from "@/services/notificationService.server"
+import { getSchoolLifecycleNotification } from "@/services/notificationHelper.server"
 
 async function authorize(request) {
   const authHeader = request.headers.get("Authorization")
@@ -43,10 +45,33 @@ export async function action({ request }) {
   try {
     if (method === 'POST') {
       const { name, address, users_id } = data
-      await query(
+      const result = await query(
         `INSERT INTO schools (name, address, users_id) VALUES (?, ?, ?)`,
         [name, address, users_id]
       )
+
+      try {
+        const message = await getSchoolLifecycleNotification({
+          action: 'created',
+          schoolName: name,
+          associatedUserId: users_id,
+        })
+
+        await notificationService.sendNotification({
+          title: 'New School Added',
+          message,
+          eventType: 'SCHOOL_CREATED',
+          targetType: 'all',
+          metadata: {
+            schoolId: String(result.insertId),
+            schoolName: name,
+          },
+          senderId: user.id,
+        })
+      } catch (notifyError) {
+        console.error('Failed to send school creation notification:', notifyError)
+      }
+
       return json({ success: true, message: 'School created successfully' })
     }
 
@@ -61,8 +86,35 @@ export async function action({ request }) {
 
     if (method === 'DELETE') {
       const { id } = data
+      const existingSchool = await query('SELECT name FROM schools WHERE id = ?', [id])
+      if (existingSchool.length === 0) {
+        return json({ success: false, message: 'School not found' }, { status: 404 })
+      }
+
       // Check for dependencies if necessary (e.g. classes)
       await query('DELETE FROM schools WHERE id = ?', [id])
+
+      try {
+        const message = await getSchoolLifecycleNotification({
+          action: 'deleted',
+          schoolName: existingSchool[0].name,
+        })
+
+        await notificationService.sendNotification({
+          title: 'School Removed',
+          message,
+          eventType: 'SCHOOL_REMOVED',
+          targetType: 'all',
+          metadata: {
+            schoolId: String(id),
+            schoolName: existingSchool[0].name,
+          },
+          senderId: user.id,
+        })
+      } catch (notifyError) {
+        console.error('Failed to send school deletion notification:', notifyError)
+      }
+
       return json({ success: true, message: 'School deleted successfully' })
     }
 

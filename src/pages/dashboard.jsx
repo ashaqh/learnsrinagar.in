@@ -4,6 +4,10 @@ import { query } from '@/lib/db'
 import { redirect } from '@remix-run/node'
 import { useLoaderData } from '@remix-run/react'
 import { format, addDays, parseISO } from 'date-fns'
+import {
+  calculateLiveClassStatus,
+  normalizeLiveClassRecords,
+} from '@/lib/liveClassDateTime'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -140,19 +144,14 @@ async function loadTeacherDashboard(teacherId) {
 
   const resolveTeacherLiveClassStatus = (liveClass) => {
     const normalizedStatus = String(liveClass?.status || '').toLowerCase()
-    const startTime = parseTeacherDashboardDate(liveClass?.start_time)
-    const endTime = parseTeacherDashboardDate(liveClass?.end_time)
-    const now = new Date()
 
     if (normalizedStatus === 'cancelled') return 'cancelled'
     if (normalizedStatus === 'completed') return 'completed'
-    if (['scheduled', 'upcoming', 'live'].includes(normalizedStatus)) {
-      return 'scheduled'
-    }
-    if (endTime && endTime < now) return 'completed'
-    if (startTime && startTime > now) return 'scheduled'
-    if (startTime && startTime <= now) return 'completed'
-    return 'scheduled'
+
+    return calculateLiveClassStatus(liveClass?.start_time, liveClass?.end_time) ===
+      'completed'
+      ? 'completed'
+      : 'scheduled'
   }
 
   teacherData.teacherHomework = await query(
@@ -170,7 +169,8 @@ async function loadTeacherDashboard(teacherId) {
     [teacherId]
   )
 
-  const teacherLiveClasses = await query(
+  const teacherLiveClasses = normalizeLiveClassRecords(
+    await query(
     `SELECT lc.id,
             lc.title,
             lc.topic_name,
@@ -188,6 +188,7 @@ async function loadTeacherDashboard(teacherId) {
        AND lc.start_time IS NOT NULL
      ORDER BY lc.start_time DESC`,
     [teacherId]
+  )
   )
 
   teacherData.teacherTimetable = teacherLiveClasses

@@ -225,10 +225,16 @@ export default function ManageBlogs() {
     return <Badge variant={variants[status]}>{status}</Badge>
   }
 
-  const BlogForm = ({ blog = null, onClose }) => (
+  const BlogForm = ({ blog = null, onClose }) => {
+    const [selectedCategoryId, setSelectedCategoryId] = useState(
+      blog?.category_id?.toString() || categories[0]?.id?.toString() || ''
+    )
+
+    return (
     <Form method="post" encType="multipart/form-data" className="space-y-4">
       <input type="hidden" name="_action" value={blog ? 'update' : 'create'} />
       {blog && <input type="hidden" name="blog_id" value={blog.id} />}
+      <input type="hidden" name="category_id" value={selectedCategoryId} />
       
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -244,7 +250,7 @@ export default function ManageBlogs() {
         
         <div className="space-y-2">
           <Label htmlFor="category_id">Category *</Label>
-          <Select name="category_id" defaultValue={blog?.category_id?.toString()} required>
+          <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
             <SelectTrigger>
               <SelectValue placeholder="Select category" />
             </SelectTrigger>
@@ -332,7 +338,8 @@ export default function ManageBlogs() {
         </Button>
       </DialogFooter>
     </Form>
-  )
+    )
+  }
 
   return (
     <div className="space-y-6">

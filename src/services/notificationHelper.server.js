@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { format } from "date-fns";
+import { createLiveClassDate } from "@/lib/liveClassDateTime";
 
 /**
  * Generates a human-like notification message for a new live class.
@@ -33,7 +34,10 @@ export async function getLiveClassNotification({ topic_name, class_id, teacher_i
     }
 
     // 3. Format Date and Time using date-fns
-    const dateObj = new Date(start_time);
+    const dateObj = createLiveClassDate(start_time);
+    if (!dateObj) {
+      throw new Error('Invalid live class start time');
+    }
     // User requested format: ____(date) at (time)
     // We'll use a friendly format: "31st March" and "09:00 PM"
     const dateStr = format(dateObj, "do MMMM (EEEE)"); // e.g. 31st March (Tuesday)
@@ -98,5 +102,72 @@ export async function getBlogNotification(title, category_id, author_id) {
   } catch (error) {
     console.error('Error generating blog notification:', error);
     return `New blog posted: ${title}. Check it out!`;
+  }
+}
+
+export async function getSchoolLifecycleNotification({
+  action,
+  schoolName,
+  associatedUserId = null,
+  associatedUserName = null,
+}) {
+  try {
+    let linkedUserName = associatedUserName || null
+
+    if (!linkedUserName && associatedUserId) {
+      const userResult = await query('SELECT name FROM users WHERE id = ?', [associatedUserId])
+      if (userResult.length > 0) {
+        linkedUserName = userResult[0].name
+      }
+    }
+
+    if (action === 'created') {
+      return linkedUserName
+        ? `A new school, ${schoolName}, has been added to Learn Srinagar and linked with ${linkedUserName}.`
+        : `A new school, ${schoolName}, has been added to Learn Srinagar.`
+    }
+
+    if (action === 'deleted') {
+      return `The school ${schoolName} has been removed from Learn Srinagar. Please contact the administration for any follow-up.`
+    }
+
+    return `There is an update for the school ${schoolName}.`
+  } catch (error) {
+    console.error('Error generating school notification:', error)
+    return action === 'deleted'
+      ? `The school ${schoolName} has been removed.`
+      : `A new school, ${schoolName}, has been added.`
+  }
+}
+
+export async function getClassAdminLifecycleNotification({
+  action,
+  adminName,
+  classId,
+  schoolId,
+}) {
+  try {
+    const [classResult, schoolResult] = await Promise.all([
+      classId ? query('SELECT name FROM classes WHERE id = ?', [classId]) : [],
+      schoolId ? query('SELECT name FROM schools WHERE id = ?', [schoolId]) : [],
+    ])
+
+    const className = classResult?.[0]?.name || 'the selected class'
+    const schoolName = schoolResult?.[0]?.name || 'the selected school'
+
+    if (action === 'created') {
+      return `${adminName} has been assigned as the class admin for class ${className} at ${schoolName}.`
+    }
+
+    if (action === 'deleted') {
+      return `${adminName} is no longer assigned as the class admin for class ${className} at ${schoolName}.`
+    }
+
+    return `There is an update to the class admin assignment for ${adminName}.`
+  } catch (error) {
+    console.error('Error generating class admin notification:', error)
+    return action === 'deleted'
+      ? `${adminName} is no longer assigned as a class admin.`
+      : `${adminName} has been assigned as a class admin.`
   }
 }

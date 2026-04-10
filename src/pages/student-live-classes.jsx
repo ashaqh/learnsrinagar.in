@@ -28,6 +28,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import {
+  calculateLiveClassStatus,
+  createLiveClassDate,
+  formatLiveClassDateTimeForDisplay,
+  normalizeLiveClassRecords,
+} from '@/lib/liveClassDateTime'
 
 const getStatusBadge = (status) => {
   const statusConfig = {
@@ -111,7 +117,14 @@ export async function loader({ request }) {
   const schoolInfo = await query('SELECT name FROM schools WHERE id = ?', [schoolId])
   const schoolName = schoolInfo[0]?.name || 'Unknown School'
 
-  return { liveClasses, subjects, user, classId, schoolId, schoolName }
+  return {
+    liveClasses: normalizeLiveClassRecords(liveClasses),
+    subjects,
+    user,
+    classId,
+    schoolId,
+    schoolName,
+  }
 }
 
 export default function StudentLiveClasses() {
@@ -136,17 +149,11 @@ export default function StudentLiveClasses() {
   // Update statuses based on current time
   const updatedLiveClasses = liveClasses.map(lc => {
     if (!lc.start_time) return lc
-    
-    const now = new Date()
-    const start = new Date(lc.start_time)
-    const end = lc.end_time ? new Date(lc.end_time) : null
-    
-    let status = lc.status
-    if (now < start) status = 'upcoming'
-    else if (end && now > end) status = 'completed'
-    else if (now >= start && (!end || now <= end)) status = 'live'
-    
-    return { ...lc, status }
+
+    return {
+      ...lc,
+      status: calculateLiveClassStatus(lc.start_time, lc.end_time),
+    }
   })
 
   // Filter live classes
@@ -163,7 +170,7 @@ export default function StudentLiveClasses() {
     
     const matchesDate = filters.date === 'all' || (() => {
       if (!lc.start_time) return filters.date === 'all'
-      const classDate = new Date(lc.start_time).toDateString()
+      const classDate = createLiveClassDate(lc.start_time)?.toDateString()
       const today = new Date().toDateString()
       const tomorrow = new Date(Date.now() + 86400000).toDateString()
       
@@ -172,7 +179,8 @@ export default function StudentLiveClasses() {
         case 'tomorrow': return classDate === tomorrow
         case 'this_week': {
           const weekFromNow = new Date(Date.now() + 7 * 86400000)
-          return new Date(lc.start_time) <= weekFromNow
+          const startDate = createLiveClassDate(lc.start_time)
+          return startDate ? startDate <= weekFromNow : false
         }
         default: return true
       }
@@ -373,7 +381,9 @@ export default function StudentLiveClasses() {
                     {liveClass.start_time && (
                       <div className='flex items-center gap-2'>
                         <span className='font-medium'>Starts:</span> 
-                        <span className='text-blue-600 font-medium'>{new Date(liveClass.start_time).toLocaleString()}</span>
+                        <span className='text-blue-600 font-medium'>
+                          {formatLiveClassDateTimeForDisplay(liveClass.start_time)}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -538,7 +548,7 @@ export default function StudentLiveClasses() {
               <div className='flex items-center justify-between text-sm text-muted-foreground'>
                 <div className='flex items-center gap-4'>
                   {selectedVideo.start_time && (
-                    <span>📅 {new Date(selectedVideo.start_time).toLocaleString()}</span>
+                    <span>📅 {formatLiveClassDateTimeForDisplay(selectedVideo.start_time)}</span>
                   )}
                   {selectedVideo.status && getStatusBadge(selectedVideo.status)}
                 </div>

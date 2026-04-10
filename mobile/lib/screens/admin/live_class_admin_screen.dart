@@ -9,6 +9,7 @@ import '../../models/school.dart';
 import '../../models/class_model.dart';
 import '../../models/subject.dart';
 import '../../models/user.dart';
+import '../../utils/live_class_datetime.dart';
 
 class LiveClassAdminScreen extends StatefulWidget {
   const LiveClassAdminScreen({super.key});
@@ -61,8 +62,11 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
     int? selectedTeacherId = liveClass?.teacherId;
     String selectedSessionType = liveClass?.sessionType ?? 'subject_specific';
     bool isAllSchools = liveClass?.isAllSchools ?? false;
-    DateTime selectedStartTime = liveClass != null ? DateTime.parse(liveClass.startTime) : DateTime.now();
-    DateTime selectedEndTime = liveClass?.endTime != null ? DateTime.parse(liveClass!.endTime!) : selectedStartTime.add(const Duration(hours: 1));
+    DateTime selectedStartTime =
+        parseLiveClassDateTime(liveClass?.startTime) ?? DateTime.now();
+    DateTime selectedEndTime =
+        parseLiveClassDateTime(liveClass?.endTime) ??
+            selectedStartTime.add(const Duration(hours: 1));
 
     showDialog(
       context: context,
@@ -78,7 +82,7 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                 TextField(controller: topicController, decoration: const InputDecoration(labelText: 'Topic Name')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: ['scheduled', 'live', 'recorded'].contains(selectedSessionType) ? 'subject_specific' : selectedSessionType,
+                  initialValue: ['scheduled', 'live', 'recorded'].contains(selectedSessionType) ? 'subject_specific' : selectedSessionType,
                   decoration: const InputDecoration(labelText: 'Session Type'),
                   items: [
                     {'value': 'subject_specific', 'label': 'Subject-Specific'},
@@ -99,26 +103,26 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                 ),
                 if (!isAllSchools)
                   DropdownButtonFormField<int>(
-                    value: selectedSchoolId,
+                    initialValue: selectedSchoolId,
                     decoration: const InputDecoration(labelText: 'School'),
                     items: _schools.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList(),
                     onChanged: (val) => setDialogState(() => selectedSchoolId = val),
                   ),
                 DropdownButtonFormField<int>(
-                  value: selectedClassId,
+                  initialValue: selectedClassId,
                   decoration: const InputDecoration(labelText: 'Class'),
                   items: _classes.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
                   onChanged: (val) => setDialogState(() => selectedClassId = val),
                 ),
                 if (selectedSessionType == 'subject_specific')
                   DropdownButtonFormField<int>(
-                    value: selectedSubjectId,
+                    initialValue: selectedSubjectId,
                     decoration: const InputDecoration(labelText: 'Subject'),
                     items: _subjects.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList(),
                     onChanged: (val) => setDialogState(() => selectedSubjectId = val),
                   ),
                 DropdownButtonFormField<int>(
-                  value: selectedTeacherId,
+                  initialValue: selectedTeacherId,
                   decoration: const InputDecoration(labelText: 'Teacher'),
                   items: _teachers.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
                   onChanged: (val) => setDialogState(() => selectedTeacherId = val),
@@ -132,6 +136,7 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                   onTap: () async {
                     final date = await showDatePicker(context: context, initialDate: selectedStartTime, firstDate: DateTime.now().subtract(const Duration(days: 30)), lastDate: DateTime.now().add(const Duration(days: 30)));
                     if (date != null) {
+                      if (!context.mounted) return;
                       final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(selectedStartTime));
                       if (time != null) {
                         setDialogState(() {
@@ -154,6 +159,7 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                   onTap: () async {
                     final date = await showDatePicker(context: context, initialDate: selectedEndTime, firstDate: selectedStartTime, lastDate: DateTime.now().add(const Duration(days: 60)));
                     if (date != null) {
+                      if (!context.mounted) return;
                       final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(selectedEndTime));
                       if (time != null) {
                         setDialogState(() => selectedEndTime = DateTime(date.year, date.month, date.day, time.hour, time.minute));
@@ -183,8 +189,8 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                   'teacher_id': selectedTeacherId,
                   'school_id': isAllSchools ? null : selectedSchoolId,
                   'is_all_schools': isAllSchools,
-                  'start_time': selectedStartTime.toIso8601String(),
-                  'end_time': selectedEndTime.toIso8601String(),
+                  'start_time': formatLiveClassDateTimeForApi(selectedStartTime),
+                  'end_time': formatLiveClassDateTimeForApi(selectedEndTime),
                 };
 
                 final messenger = ScaffoldMessenger.of(context);
@@ -211,9 +217,16 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final upcoming = _liveClasses.where((l) => DateTime.parse(l.startTime).isAfter(now)).toList();
-    final past = _liveClasses.where((l) => DateTime.parse(l.startTime).isBefore(now)).toList();
+    final upcoming = _liveClasses
+        .where(
+          (l) => calculateLiveClassStatus(l.startTime, l.endTime) == 'upcoming',
+        )
+        .toList();
+    final past = _liveClasses
+        .where(
+          (l) => calculateLiveClassStatus(l.startTime, l.endTime) != 'upcoming',
+        )
+        .toList();
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final isReadOnly = auth.user?.roleName == 'school_admin' ||
         auth.user?.roleName == 'class_admin' ||
@@ -262,7 +275,6 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
       itemCount: classes.length,
       itemBuilder: (context, index) {
         final lc = classes[index];
-        final startTime = DateTime.parse(lc.startTime);
 
         return Card(
           margin: const EdgeInsets.only(bottom: 16),
@@ -288,7 +300,14 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
                     const SizedBox(width: 16),
                     const Icon(LucideIcons.calendar, size: 14, color: Colors.grey),
                     const SizedBox(width: 4),
-                    Text(DateFormat('MMM dd, HH:mm').format(startTime), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(
+                      formatLiveClassDateTimeForText(
+                        lc.startTime,
+                        pattern: 'MMM dd, HH:mm',
+                        fallback: '--',
+                      ),
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   ],
                 ),
               ),
@@ -362,7 +381,8 @@ class _LiveClassAdminScreenState extends State<LiveClassAdminScreen> with Single
       'school_id': lc.schoolId,
       'is_all_schools': lc.isAllSchools,
       'start_time': lc.startTime,
-      if (newStatus == 'recorded') 'end_time': DateTime.now().toIso8601String(),
+      if (newStatus == 'recorded')
+        'end_time': formatLiveClassDateTimeForApi(DateTime.now()),
     };
 
     final result = await _adminService.saveLiveClass(classData, id: lc.id);

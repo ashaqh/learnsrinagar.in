@@ -105,10 +105,15 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
     );
 
     if (confirm == true) {
+      final messenger = ScaffoldMessenger.of(context);
       final result = await _blogsService.deleteBlog(token, id);
-      if (mounted && result['success']) {
+      if (!mounted) {
+        return;
+      }
+
+      if (result['success']) {
         _fetchBlogs();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Blog deleted')));
+        messenger.showSnackBar(const SnackBar(content: Text('Blog deleted')));
       }
     }
   }
@@ -150,6 +155,7 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
     );
 
     if (result == true && nameController.text.isNotEmpty) {
+      final messenger = ScaffoldMessenger.of(context);
       final token = Provider.of<AuthProvider>(context, listen: false).token;
       if (token == null) return;
 
@@ -157,15 +163,17 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
           ? await _blogsService.updateCategory(token, category['id'], nameController.text, descController.text)
           : await _blogsService.createCategory(token, nameController.text, descController.text);
 
-      if (mounted) {
-        if (response['success']) {
-          _fetchCategories();
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Category saved')));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(response['message'] ?? 'Failed to save category'), backgroundColor: Colors.red),
-          );
-        }
+      if (!mounted) {
+        return;
+      }
+
+      if (response['success']) {
+        _fetchCategories();
+        messenger.showSnackBar(const SnackBar(content: Text('Category saved')));
+      } else {
+        messenger.showSnackBar(
+          SnackBar(content: Text(response['message'] ?? 'Failed to save category'), backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -188,13 +196,18 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
     );
 
     if (confirm == true) {
+      final messenger = ScaffoldMessenger.of(context);
       final token = Provider.of<AuthProvider>(context, listen: false).token;
       if (token == null) return;
 
       final result = await _blogsService.deleteCategory(token, id);
-      if (mounted && result['success']) {
+      if (!mounted) {
+        return;
+      }
+
+      if (result['success']) {
         _fetchCategories();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Category deleted')));
+        messenger.showSnackBar(const SnackBar(content: Text('Category deleted')));
       }
     }
   }
@@ -215,7 +228,7 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
         child: Image.memory(bytes, width: 50, height: 50, fit: BoxFit.cover),
       );
     } catch (e) {
-      return Container(width: 50, height: 50, child: Icon(LucideIcons.image_off));
+      return const SizedBox(width: 50, height: 50, child: Icon(LucideIcons.image_off));
     }
   }
 
@@ -272,7 +285,7 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: _blogs.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (context, index) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final blog = _blogs[index];
           return Container(
@@ -281,7 +294,7 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.grey[100]!),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: Row(
               children: [
@@ -331,7 +344,7 @@ class _ManageBlogsScreenState extends State<ManageBlogsScreen> with SingleTicker
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: _categories.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        separatorBuilder: (context, index) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final cat = _categories[index];
           return ListTile(

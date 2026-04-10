@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/school.dart';
 import '../models/class_model.dart';
@@ -142,7 +143,7 @@ class AdminService {
         return (data['classes'] as List).map((c) => ClassModel.fromJson(c)).toList();
       }
     } catch (e) {
-      print('Error fetching classes: $e');
+      debugPrint('Error fetching classes: $e');
     }
     return [];
   }
@@ -195,7 +196,7 @@ class AdminService {
         return (data['subjects'] as List).map((s) => Subject.fromJson(s)).toList();
       }
     } catch (e) {
-      print('Error fetching subjects: $e');
+      debugPrint('Error fetching subjects: $e');
     }
     return [];
   }
@@ -347,7 +348,10 @@ class AdminService {
   Future<Map<String, dynamic>> saveLiveClass(Map<String, dynamic> classData, {int? id}) async {
     try {
       final url = Uri.parse('$baseUrl/live-classes');
-      final body = jsonEncode({...classData, if (id != null) 'id': id});
+      final body = jsonEncode({
+        ...classData,
+        ...?(id != null ? {'id': id} : null),
+      });
       final response = id != null ? await http.put(url, headers: _headers, body: body) : await http.post(url, headers: _headers, body: body);
       return jsonDecode(response.body);
     } catch (e) {

@@ -92,7 +92,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
     final isSuperAdmin = auth.user?.roleName == 'super_admin';
-    final isAllowedToSend = isSuperAdmin || auth.user?.roleName == 'school_admin';
+    final isAllowedToSend = isSuperAdmin;
 
     return Scaffold(
       appBar: AppBar(
@@ -136,7 +136,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: isRead ? Colors.grey[200] : Theme.of(context).primaryColor.withOpacity(0.1),
+                          backgroundColor: isRead ? Colors.grey[200] : Theme.of(context).primaryColor.withValues(alpha: 0.1),
                           child: Icon(
                             _getIcon(notif['event_type']),
                             color: isRead ? Colors.grey : Theme.of(context).primaryColor,
@@ -204,7 +204,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 }
               },
               icon: const Icon(Icons.send),
-              label: const Text('Compse'),
+              label: const Text('Compose'),
               backgroundColor: const Color(0xFF6366F1),
               foregroundColor: Colors.white,
             )

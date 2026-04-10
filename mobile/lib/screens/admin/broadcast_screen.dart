@@ -219,13 +219,16 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
     if (confirmed == true) {
       final token = Provider.of<AuthProvider>(context, listen: false).token;
+      final messenger = ScaffoldMessenger.of(context);
       final result = await _blogsService.deleteBlog(token!, broadcast['id']);
-      if (mounted) {
-        if (result['success']) {
-          _fetchBroadcasts();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'])));
-        }
+      if (!mounted) {
+        return;
+      }
+
+      if (result['success']) {
+        _fetchBroadcasts();
+      } else {
+        messenger.showSnackBar(SnackBar(content: Text(result['message'])));
       }
     }
   }

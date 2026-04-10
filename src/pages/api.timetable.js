@@ -1,6 +1,7 @@
 import { json } from "@remix-run/node"
 import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
+import { formatLiveClassDateTimeForApi } from "@/lib/liveClassDateTime"
 
 export async function loader({ request }) {
   const authHeader = request.headers.get("Authorization")
@@ -43,7 +44,15 @@ export async function loader({ request }) {
       [classId, classId]
     )
 
-    return json({ timetable })
+    return json({
+      timetable: timetable.map((item) => ({
+        ...item,
+        raw_start_time: formatLiveClassDateTimeForApi(item.raw_start_time),
+        raw_end_time: item.raw_end_time
+          ? formatLiveClassDateTimeForApi(item.raw_end_time)
+          : null,
+      })),
+    })
   } catch (error) {
     return json({ error: "Internal server error" }, { status: 500 })
   }

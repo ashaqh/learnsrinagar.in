@@ -5,7 +5,6 @@ import { getUser } from '@/lib/auth'
 import {
   useLoaderData,
   useSubmit,
-  useNavigate,
   useActionData,
 } from '@remix-run/react'
 import { toast } from 'sonner'
@@ -67,8 +66,26 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 
+async function resolveEffectiveSchoolId(user) {
+  if (user?.role_name !== 'school_admin') {
+    return user?.school_id || null
+  }
+
+  if (user.school_id) {
+    return user.school_id
+  }
+
+  const schools = await query(
+    'SELECT id FROM schools WHERE users_id = ? LIMIT 1',
+    [user.id]
+  )
+
+  return schools[0]?.id || null
+}
+
 export async function loader({ request }) {
   const user = await getUser(request)
+  const schoolId = await resolveEffectiveSchoolId(user)
 
   // Build the students query with potential filters based on user permissions
   let studentsQuery = `
@@ -97,9 +114,9 @@ export async function loader({ request }) {
   }
 
   // Filter by school_id if user has it
-  if (user.school_id) {
+  if (schoolId) {
     whereConditions.push('sp.schools_id = ?')
-    queryParams.push(user.school_id)
+    queryParams.push(schoolId)
   }
 
   // Add WHERE conditions to the query if needed
@@ -116,6 +133,9 @@ export async function loader({ request }) {
   if (user.class_ids && user.class_ids.length > 0) {
     classesQuery += ` WHERE id IN (${user.class_ids.map(() => '?').join(',')})`
     classQueryParams.push(...user.class_ids)
+  } else if (schoolId) {
+    classesQuery += ` WHERE school_id = ?`
+    classQueryParams.push(schoolId)
   }
 
   const classes = await query(classesQuery, classQueryParams)
@@ -124,9 +144,9 @@ export async function loader({ request }) {
   let schoolsQuery = `SELECT id, name FROM schools`
   const schoolQueryParams = []
 
-  if (user.school_id) {
+  if (schoolId) {
     schoolsQuery += ` WHERE id = ?`
-    schoolQueryParams.push(user.school_id)
+    schoolQueryParams.push(schoolId)
   }
 
   const schools = await query(schoolsQuery, schoolQueryParams)
@@ -163,6 +183,7 @@ export async function action({ request }) {
   const formData = await request.formData()
   const action = formData.get('_action')
   const user = await getUser(request)
+  const schoolId = await resolveEffectiveSchoolId(user)
 
   try {
     if (action === 'create') {
@@ -173,7 +194,7 @@ export async function action({ request }) {
       const enrollment_no = formData.get('enrollment_no')
       const date_of_birth = formData.get('date_of_birth')
       const class_id = formData.get('class_id')
-      const schools_id = user.school_id
+      const schools_id = schoolId
 
       // Parent details
       const addParent = formData.get('add_parent') === 'on'
@@ -181,6 +202,13 @@ export async function action({ request }) {
       const parentEmail = formData.get('parent_email')
       const parentPassword = formData.get('parent_password')
       const existingParentId = formData.get('existing_parent_id')
+
+      if (!schools_id) {
+        return {
+          success: false,
+          message: 'Your account is not linked to a school yet.',
+        }
+      }
 
       // Check for duplicate student email
       const dupEmail = await query('SELECT id FROM users WHERE email = ?', [
@@ -289,7 +317,7 @@ export async function action({ request }) {
       const enrollment_no = formData.get('enrollment_no')
       const date_of_birth = formData.get('date_of_birth')
       const class_id = formData.get('class_id')
-      const schools_id = user.school_id
+      const schools_id = schoolId
 
       // Parent details
       const addParent = formData.get('add_parent') === 'on'
@@ -297,6 +325,13 @@ export async function action({ request }) {
       const parentEmail = formData.get('parent_email')
       const parentPassword = formData.get('parent_password')
       const existingParentId = formData.get('existing_parent_id')
+
+      if (!schools_id) {
+        return {
+          success: false,
+          message: 'Your account is not linked to a school yet.',
+        }
+      }
 
       // Check for duplicate student email
       const dupEmail = await query(
@@ -464,7 +499,6 @@ export default function Student() {
     useLoaderData()
   const actionData = useActionData()
   const submit = useSubmit()
-  const navigate = useNavigate()
 
   const [openDialog, setOpenDialog] = useState(false)
   const [dialogType, setDialogType] = useState('create')
@@ -478,6 +512,8 @@ export default function Student() {
   })
   const [addParent, setAddParent] = useState(false)
   const [useExistingParent, setUseExistingParent] = useState(false)
+  const [selectedClassId, setSelectedClassId] = useState('')
+  const [selectedExistingParentId, setSelectedExistingParentId] = useState('')
 
   useEffect(() => {
     if (actionData) {
@@ -498,6 +534,8 @@ export default function Student() {
     // Reset parent-related state when student selection changes
     setAddParent(false)
     setUseExistingParent(false)
+    setSelectedClassId(selectedStudent?.class_id?.toString() || '')
+    setSelectedExistingParentId('')
   }, [selectedStudent])
 
   const handleCreateStudent = () => {
@@ -507,12 +545,16 @@ export default function Student() {
     setOpenDialog(true)
     setAddParent(false)
     setUseExistingParent(false)
+    setSelectedClassId('')
+    setSelectedExistingParentId('')
   }
 
   const handleEditStudent = (student) => {
     setDialogType('update')
     setSelectedStudent(student)
     setOpenDialog(true)
+    setSelectedClassId(student?.class_id?.toString() || '')
+    setSelectedExistingParentId('')
   }
 
   const openDeleteDialog = (student) => {
@@ -537,6 +579,17 @@ export default function Student() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
+
+    if (classes.length > 0 && !selectedClassId) {
+      toast.error('Please select a class.')
+      return
+    }
+
+    if (addParent && useExistingParent && !selectedExistingParentId) {
+      toast.error('Please select an existing parent.')
+      return
+    }
+
     const fd = new FormData(e.currentTarget)
     fd.append('_action', dialogType)
     if (dialogType === 'update' && selectedStudent) {
@@ -548,6 +601,12 @@ export default function Student() {
     if (selectedDate) {
       fd.set('date_of_birth', format(selectedDate, 'yyyy-MM-dd'))
     }
+    fd.set('class_id', selectedClassId)
+    fd.set('add_parent', addParent ? 'on' : '')
+    fd.set(
+      'existing_parent_id',
+      useExistingParent ? selectedExistingParentId : ''
+    )
     submit(fd, { method: 'post' })
   }
 
@@ -747,7 +806,21 @@ export default function Student() {
                 : 'Update the student information.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSubmit}>
+          <form
+            key={`${dialogType}-${selectedStudent?.id ?? 'new'}`}
+            onSubmit={handleSubmit}
+          >
+            <input type='hidden' name='class_id' value={selectedClassId} />
+            <input
+              type='hidden'
+              name='add_parent'
+              value={addParent ? 'on' : ''}
+            />
+            <input
+              type='hidden'
+              name='existing_parent_id'
+              value={useExistingParent ? selectedExistingParentId : ''}
+            />
             <div className='grid gap-6 pb-4'>
               {/* Student Information */}
               <div className='grid grid-cols-2 gap-4'>
@@ -832,9 +905,8 @@ export default function Student() {
                   <div className='grid gap-2 col-span-2'>
                     <label htmlFor='class_id'>Class</label>
                     <Select
-                      name='class_id'
-                      defaultValue={selectedStudent?.class_id?.toString() || ''}
-                      required
+                      value={selectedClassId}
+                      onValueChange={setSelectedClassId}
                     >
                       <SelectTrigger className='w-full'>
                         <SelectValue placeholder='Select a class' />
@@ -868,9 +940,15 @@ export default function Student() {
                 <div className='flex items-center space-x-2 mb-4'>
                   <Checkbox
                     id='add_parent'
-                    name='add_parent'
                     checked={addParent}
-                    onCheckedChange={setAddParent}
+                    onCheckedChange={(checked) => {
+                      const shouldAddParent = checked === true
+                      setAddParent(shouldAddParent)
+                      if (!shouldAddParent) {
+                        setUseExistingParent(false)
+                        setSelectedExistingParentId('')
+                      }
+                    }}
                   />
                   <label htmlFor='add_parent' className='text-base font-medium'>
                     {dialogType === 'create'
@@ -922,7 +1000,13 @@ export default function Student() {
                       <Checkbox
                         id='use_existing_parent'
                         checked={useExistingParent}
-                        onCheckedChange={setUseExistingParent}
+                        onCheckedChange={(checked) => {
+                          const shouldUseExistingParent = checked === true
+                          setUseExistingParent(shouldUseExistingParent)
+                          if (!shouldUseExistingParent) {
+                            setSelectedExistingParentId('')
+                          }
+                        }}
                       />
                       <label
                         htmlFor='use_existing_parent'
@@ -937,7 +1021,10 @@ export default function Student() {
                         <label htmlFor='existing_parent_id'>
                           Select Parent
                         </label>
-                        <Select name='existing_parent_id' required>
+                        <Select
+                          value={selectedExistingParentId}
+                          onValueChange={setSelectedExistingParentId}
+                        >
                           <SelectTrigger className='w-full'>
                             <SelectValue placeholder='Select a parent' />
                           </SelectTrigger>

@@ -124,12 +124,6 @@ class NotificationService {
     await syncTokenWithBackend();
   }
 
-  static Future<void> _saveToken(String token) async {
-    await _storage.write(key: 'fcm_token', value: token);
-    // Sync with backend (only succeeds if user is logged in and has JWT)
-    await syncTokenWithBackend();
-  }
-
   static Future<void> syncTokenWithBackend() async {
     final jwt = await _storage.read(key: 'jwt_token');
     var fcmToken = await _storage.read(key: 'fcm_token');

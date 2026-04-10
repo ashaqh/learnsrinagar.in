@@ -17,7 +17,7 @@ void main() async {
     // Initialize notifications early so token is available for AuthProvider
     await NotificationService.initialize();
   } catch (e) {
-    print('Error initializing Firebase/Notifications: $e');
+    debugPrint('Error initializing Firebase/Notifications: $e');
   }
 
   runApp(

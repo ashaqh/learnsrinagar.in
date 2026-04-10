@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../services/timetable_service.dart';
+import '../utils/live_class_datetime.dart';
 
 class TimetableScreen extends StatefulWidget {
   final int? classId;
@@ -39,13 +40,12 @@ class _TimetableScreenState extends State<TimetableScreen> {
           _timetableByDate = {};
           final dateSet = <String>{};
           for (var item in list) {
-            // Parse raw start time and convert to local time
             String date;
             if (item['raw_start_time'] != null) {
-              DateTime dt = DateTime.parse(item['raw_start_time'].toString());
-              // Always convert to local timezone for correct date grouping
-              dt = dt.toLocal();
-              date = DateFormat('yyyy-MM-dd').format(dt);
+              final dateTime = parseLiveClassDateTime(item['raw_start_time']);
+              date = dateTime != null
+                  ? DateFormat('yyyy-MM-dd').format(dateTime)
+                  : item['class_date']?.toString().split('T')[0] ?? 'No Date';
             } else {
               date = item['class_date']?.toString().split('T')[0] ?? 'No Date';
             }
@@ -206,17 +206,10 @@ class _TimetableScreenState extends State<TimetableScreen> {
     }
   }
   String _formatLocalTime(dynamic rawTime) {
-    if (rawTime == null) return '--:--';
-    try {
-      DateTime dt = DateTime.parse(rawTime.toString());
-      // Convert UTC to local
-      dt = dt.toLocal();
-      return DateFormat('HH:mm').format(dt);
-    } catch (_) {
-      // Fallback: try to use as-is if it's already a time string
-      final str = rawTime.toString();
-      if (str.length >= 5) return str.substring(0, 5);
-      return str;
-    }
+    return formatLiveClassDateTimeForText(
+      rawTime,
+      pattern: 'HH:mm',
+      fallback: '--:--',
+    );
   }
 }

@@ -28,6 +28,8 @@ export async function action({ request }) {
     const email = form.get('email')
     const password = form.get('password')
 
+    console.log(`[Login] Attempt for email: ${email}`);
+
     const users = await query('SELECT * FROM users WHERE email = ?', [email]);
     
     if (users.length === 0) {

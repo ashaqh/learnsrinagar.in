@@ -108,13 +108,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: authProvider.isLoading
                       ? null
                       : () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           final error = await authProvider.login(
                             _emailController.text,
                             _passwordController.text,
                           );
                           if (!mounted) return;
                           if (error != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            messenger.showSnackBar(
                               SnackBar(content: Text(error)),
                             );
                           }

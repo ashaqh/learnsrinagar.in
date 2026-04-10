@@ -610,7 +610,7 @@ class _SurveyDialogState extends State<_SurveyDialog>
                               child: const Text('No linked students found.'),
                             )
                           : DropdownButtonFormField<int>(
-                              value: _selectedStudentId,
+                              initialValue: _selectedStudentId,
                               isExpanded: true,
                               hint: const Text('Select a student'),
                               decoration: InputDecoration(
@@ -764,7 +764,7 @@ class _SurveyDialogState extends State<_SurveyDialog>
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<int>(
-                      value: rating,
+                      initialValue: rating,
                       isExpanded: true,
                       hint: const Text('Select a rating', style: TextStyle(fontSize: 12)),
                       decoration: InputDecoration(

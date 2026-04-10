@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../services/dashboard_service.dart';
 import '../widgets/main_drawer.dart';
 import './notifications_screen.dart';
+import '../utils/live_class_datetime.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -1650,12 +1651,12 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
           const SizedBox(height: 10),
           Text(
-            _formatDashboardDate(item['start_time']),
+            _formatLiveClassDate(item['start_time']),
             style: TextStyle(color: Colors.grey[700], fontSize: 13),
           ),
           const SizedBox(height: 4),
           Text(
-            _formatTimeRange(item['start_time'], item['end_time']),
+            _formatLiveClassTimeRange(item['start_time'], item['end_time']),
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
@@ -1780,17 +1781,28 @@ class _DashboardScreenState extends State<DashboardScreen>
     return int.tryParse(value?.toString() ?? '0') ?? 0;
   }
 
-  String _formatTimeRange(dynamic startRaw, dynamic endRaw) {
-    try {
-      final start = DateTime.parse(startRaw.toString()).toLocal();
-      final startText = DateFormat('hh:mm a').format(start);
-      if (endRaw == null) return startText;
+  String _formatLiveClassDate(dynamic rawDate) {
+    return formatLiveClassDateTimeForText(
+      rawDate,
+      pattern: 'EEEE, MMM d, yyyy',
+      fallback: rawDate?.toString() ?? 'Unknown date',
+    );
+  }
 
-      final end = DateTime.parse(endRaw.toString()).toLocal();
-      return '$startText - ${DateFormat('hh:mm a').format(end)}';
-    } catch (_) {
-      return '-';
-    }
+  String _formatLiveClassTimeRange(dynamic startRaw, dynamic endRaw) {
+    final startText = formatLiveClassDateTimeForText(
+      startRaw,
+      pattern: 'hh:mm a',
+      fallback: '-',
+    );
+    if (endRaw == null) return startText;
+
+    final endText = formatLiveClassDateTimeForText(
+      endRaw,
+      pattern: 'hh:mm a',
+      fallback: '-',
+    );
+    return '$startText - $endText';
   }
 
   Widget _buildFeedbackSubmissionCard(Map<String, dynamic> submission) {

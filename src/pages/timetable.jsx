@@ -13,6 +13,10 @@ import {
 import { VideoIcon, CalendarIcon, Youtube } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import {
+  createLiveClassDate,
+  normalizeLiveClassRecords,
+} from '@/lib/liveClassDateTime'
 
 export async function loader({ request }) {
   const user = await getUser(request)
@@ -30,7 +34,7 @@ export async function loader({ request }) {
     ORDER BY z.start_time ASC
   `)
 
-  return { liveClasses, user }
+  return { liveClasses: normalizeLiveClassRecords(liveClasses), user }
 }
 
 export default function Timetable() {
@@ -51,9 +55,10 @@ export default function Timetable() {
 
   useEffect(() => {
     // Filter classes by selected date
-    const selectedDateObj = new Date(selectedDate)
+    const selectedDateObj = new Date(`${selectedDate}T00:00:00`)
     let filteredClasses = liveClasses.filter((cls) => {
-      const classDate = new Date(cls.start_time)
+      const classDate = createLiveClassDate(cls.start_time)
+      if (!classDate) return false
       return isSameDay(classDate, selectedDateObj)
     })
 
@@ -68,8 +73,8 @@ export default function Timetable() {
 
     // Sort classes by time
     filteredClasses.sort((a, b) => {
-      const timeA = new Date(a.start_time).getTime()
-      const timeB = new Date(b.start_time).getTime()
+      const timeA = createLiveClassDate(a.start_time)?.getTime() || 0
+      const timeB = createLiveClassDate(b.start_time)?.getTime() || 0
       return timeA - timeB
     })
 
@@ -102,8 +107,9 @@ export default function Timetable() {
 
     filteredClasses.forEach((cls) => {
       // Create a Date object
-      const startTime = new Date(cls.start_time)
-      const endTime = new Date(cls.end_time)
+      const startTime = createLiveClassDate(cls.start_time)
+      const endTime = createLiveClassDate(cls.end_time)
+      if (!startTime || !endTime) return
 
       const timeKey = `${format(startTime, 'h:mm a')} - ${format(
         endTime,
@@ -164,8 +170,9 @@ export default function Timetable() {
 
     // Fill in timetable with class data
     filteredClasses.forEach((cls) => {
-      const startTime = new Date(cls.start_time)
-      const endTime = new Date(cls.end_time)
+      const startTime = createLiveClassDate(cls.start_time)
+      const endTime = createLiveClassDate(cls.end_time)
+      if (!startTime || !endTime) return
 
       const timeKey = `${format(startTime, 'h:mm a')} - ${format(
         endTime,
@@ -224,7 +231,7 @@ export default function Timetable() {
       {/* Display selected date */}
       <div className='mb-4 p-3 bg-gray-50 rounded-lg'>
         <span className='font-medium text-gray-700 text-sm sm:text-base'>
-          Schedule: {format(new Date(selectedDate), 'dd/MM/yyyy')}
+          Schedule: {format(new Date(`${selectedDate}T00:00:00`), 'dd/MM/yyyy')}
         </span>
       </div>
 
@@ -332,11 +339,11 @@ export default function Timetable() {
         <div className='p-8 text-center text-muted-foreground border rounded-lg'>
           {isTeacher
             ? `You have no classes scheduled for ${format(
-                new Date(selectedDate),
+                new Date(`${selectedDate}T00:00:00`),
                 'dd/MM/yyyy'
               )}.`
             : `No classes scheduled for ${format(
-                new Date(selectedDate),
+                new Date(`${selectedDate}T00:00:00`),
                 'dd/MM/yyyy'
               )}.`}
         </div>

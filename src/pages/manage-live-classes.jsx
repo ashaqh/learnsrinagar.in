@@ -7,6 +7,7 @@ import {
   useLoaderData,
   useNavigation,
 } from '@remix-run/react'
+import { json } from '@remix-run/node'
 
 import { query } from '@/lib/db'
 import { getUser } from '@/lib/auth'
@@ -57,6 +58,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Edit, Trash2, ExternalLink, Play, Clock, CheckCircle, Filter, Search } from 'lucide-react'
+import {
+  calculateLiveClassStatus,
+  createLiveClassDate,
+  formatLiveClassDateTimeForDb,
+  formatLiveClassDateTimeForDisplay,
+  formatLiveClassDateTimeForInput,
+  normalizeLiveClassRecords,
+} from '@/lib/liveClassDateTime'
 
 const getStatusBadge = (status) => {
   const statusConfig = {
@@ -77,19 +86,8 @@ const getStatusBadge = (status) => {
   )
 }
 
-const calculateStatus = (startTime, endTime) => {
-  if (!startTime) return 'upcoming'
-  
-  const now = new Date()
-  const start = new Date(startTime)
-  const end = endTime ? new Date(endTime) : null
-  
-  if (now < start) return 'upcoming'
-  if (end && now > end) return 'completed'
-  if (now >= start && (!end || now <= end)) return 'live'
-  
-  return 'upcoming'
-}
+const calculateStatus = (startTime, endTime) =>
+  calculateLiveClassStatus(startTime, endTime)
 
 export async function loader({ request }) {
   const user = await getUser(request)
@@ -140,7 +138,7 @@ export async function loader({ request }) {
     classes = classesResult
     subjects = subjectsResult
     teachers = teachersResult
-    liveClasses = liveClassesResult
+      liveClasses = normalizeLiveClassRecords(liveClassesResult)
   } else if (user.role_name === 'school_admin' || user.role_name === 'class_admin') {
     let schoolId = user.school_id;
     let schoolsResult = [];
@@ -173,7 +171,13 @@ export async function loader({ request }) {
       classes = classesResult
       subjects = subjectsResult
       teachers = teachersResult
-      liveClasses = liveClassesResult.map(lc => ({ ...lc, school_count: lc.is_all_schools ? 2 : 1, school_ids: schoolId.toString() }))
+      liveClasses = normalizeLiveClassRecords(
+        liveClassesResult.map((lc) => ({
+          ...lc,
+          school_count: lc.is_all_schools ? 2 : 1,
+          school_ids: schoolId.toString(),
+        }))
+      )
     }
   } else if (user.role_name === 'teacher') {
     const classesResult = await query(`
@@ -206,7 +210,13 @@ export async function loader({ request }) {
     classes = classesResult
     subjects = subjectsResult
     teachers = [{ id: user.id, name: user.name }]
-    liveClasses = liveClassesResult.map(lc => ({ ...lc, school_count: 1, school_ids: lc.school_id?.toString() }))
+      liveClasses = normalizeLiveClassRecords(
+        liveClassesResult.map((lc) => ({
+          ...lc,
+          school_count: 1,
+          school_ids: lc.school_id?.toString(),
+        }))
+      )
   }
 
   return { classes, subjects, teachers, liveClasses, schools, user }
@@ -222,7 +232,7 @@ export async function action({ request }) {
     user.role_name === 'school_admin' ||
     user.role_name === 'class_admin'
   ) {
-    return { success: false, message: 'You have view-only access to live classes' }
+    return json({ success: false, message: 'You have view-only access to live classes' }, { status: 403 })
   }
 
   const formData = await request.formData()
@@ -238,16 +248,30 @@ export async function action({ request }) {
       const class_id = formData.get('class_id')
       const teacher_id = formData.get('teacher_id') || user.id
       const school_id = formData.get('school_id')
-      const start_time = formData.get('start_time')
-      const end_time = formData.get('end_time')
+      const start_time = formatLiveClassDateTimeForDb(formData.get('start_time'))
+      const end_time = formatLiveClassDateTimeForDb(formData.get('end_time'))
       
       const zoom_link = formData.get('zoom_link')
+
+      if (!title || !youtube_live_link || !topic_name || !class_id || !teacher_id) {
+        return json({
+          success: false,
+          message: 'Title, topic, class, teacher, and live link are required fields',
+        }, { status: 400 })
+      }
+
+      if (user.role_name === 'super_admin' && !school_id) {
+        return json({
+          success: false,
+          message: 'Please select a school or choose All Schools',
+        }, { status: 400 })
+      }
       
       if (!start_time || !end_time) {
-        return {
+        return json({
           success: false,
           message: 'Start Time and End Time are mandatory fields',
-        }
+        }, { status: 400 })
       }
       
       const status = calculateStatus(start_time, end_time)
@@ -283,16 +307,17 @@ export async function action({ request }) {
           eventType: 'CLASS_SCHEDULED',
           targetType: is_all_schools ? 'all' : 'group',
           targetId: is_all_schools ? null : class_id,
+          audienceContext: is_all_schools ? null : { schoolId: final_school_id },
           metadata: { topic: topic_name, startTime: start_time, title: title, zoomLink: zoom_link }
         });
       } catch (notifyError) {
         console.error('Failed to send live class notification:', notifyError);
       }
 
-      return {
+      return json({
         success: true,
         message: school_id === 'all' ? 'Live class created for all schools successfully' : 'Live class created successfully',
-      }
+      })
     } else if (intent === 'update') {
       const id = formData.get('id')
       const title = formData.get('title')
@@ -301,16 +326,23 @@ export async function action({ request }) {
       const topic_name = formData.get('topic_name')
       const subject_id = formData.get('subject_id') || null
       const class_id = formData.get('class_id')
-      const start_time = formData.get('start_time')
-      const end_time = formData.get('end_time')
+      const start_time = formatLiveClassDateTimeForDb(formData.get('start_time'))
+      const end_time = formatLiveClassDateTimeForDb(formData.get('end_time'))
       
       const zoom_link = formData.get('zoom_link')
+
+      if (!id || !title || !youtube_live_link || !topic_name || !class_id) {
+        return json({
+          success: false,
+          message: 'Missing required live class details',
+        }, { status: 400 })
+      }
       
       if (!start_time || !end_time) {
-        return {
+        return json({
           success: false,
           message: 'Start Time and End Time are mandatory fields',
-        }
+        }, { status: 400 })
       }
       
       const status = calculateStatus(start_time, end_time)
@@ -322,28 +354,28 @@ export async function action({ request }) {
         [title, youtube_live_link, zoom_link, session_type, topic_name, subject_id, class_id, start_time, end_time, status, id]
       )
 
-      return {
+      return json({
         success: true,
         message: 'Live class updated successfully',
-      }
+      })
     } else if (intent === 'delete') {
       const id = formData.get('id')
       await query('DELETE FROM live_classes WHERE id = ?', [id])
 
-      return {
+      return json({
         success: true,
         message: 'Live class deleted successfully',
-      }
+      })
     }
   } catch (error) {
     console.error('Live class action error:', error)
-    return {
+    return json({
       success: false,
-      message: 'An error occurred while processing your request',
-    }
+      message: error.message || 'An error occurred while processing your request',
+    }, { status: 500 })
   }
 
-  return null
+  return json({ success: false, message: 'Unknown action' }, { status: 400 })
 }
 
 export default function ManageLiveClasses() {
@@ -361,8 +393,11 @@ export default function ManageLiveClasses() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState('create')
   const [selectedClass, setSelectedClass] = useState(null)
-  const [toDelete, setToDelete] = useState(null)
   const [sessionType, setSessionType] = useState('subject_specific')
+  const [selectedSubjectId, setSelectedSubjectId] = useState('')
+  const [selectedTeacherId, setSelectedTeacherId] = useState('')
+  const [selectedSchoolId, setSelectedSchoolId] = useState('')
+  const [selectedFormClassId, setSelectedFormClassId] = useState('')
 
   // Filter states
   const [filters, setFilters] = useState({
@@ -384,6 +419,7 @@ export default function ManageLiveClasses() {
   }
 
   const handleClassChange = (classId) => {
+    setSelectedFormClassId(classId)
     const className = classes.find(c => c.id.toString() === classId)?.name
     if (className && permanentZoomLinks[className]) {
       setZoomLink(permanentZoomLinks[className])
@@ -434,7 +470,7 @@ export default function ManageLiveClasses() {
     
     const matchesDate = filters.date === 'all' || (() => {
       if (!lc.start_time) return filters.date === 'all'
-      const classDate = new Date(lc.start_time).toDateString()
+      const classDate = createLiveClassDate(lc.start_time)?.toDateString()
       const today = new Date().toDateString()
       const tomorrow = new Date(Date.now() + 86400000).toDateString()
       
@@ -443,7 +479,8 @@ export default function ManageLiveClasses() {
         case 'tomorrow': return classDate === tomorrow
         case 'this_week': {
           const weekFromNow = new Date(Date.now() + 7 * 86400000)
-          return new Date(lc.start_time) <= weekFromNow
+          const startDate = createLiveClassDate(lc.start_time)
+          return startDate ? startDate <= weekFromNow : false
         }
         default: return true
       }
@@ -456,6 +493,10 @@ export default function ManageLiveClasses() {
     setDialogType('create')
     setSelectedClass(null)
     setSessionType('subject_specific')
+    setSelectedSubjectId('')
+    setSelectedTeacherId('')
+    setSelectedSchoolId(user.role_name === 'school_admin' ? String(user.school_id ?? '') : '')
+    setSelectedFormClassId('')
     setDialogOpen(true)
   }
 
@@ -463,6 +504,12 @@ export default function ManageLiveClasses() {
     setDialogType('update')
     setSelectedClass(liveClass)
     setSessionType(liveClass.session_type)
+    setSelectedSubjectId(liveClass.subject_id?.toString() || '')
+    setSelectedTeacherId(liveClass.teacher_id?.toString() || '')
+    setSelectedSchoolId(
+      liveClass.is_all_schools ? 'all' : liveClass.school_id?.toString() || ''
+    )
+    setSelectedFormClassId(liveClass.class_id?.toString() || '')
     setDialogOpen(true)
   }
 
@@ -498,11 +545,19 @@ export default function ManageLiveClasses() {
                       : 'Update the live class information. Start Time and End Time are mandatory.'}
                   </DialogDescription>
                 </DialogHeader>
-                <Form method='post'>
+                <Form
+                  key={`${dialogType}-${selectedClass?.id ?? 'new'}`}
+                  method='post'
+                >
                   <input type='hidden' name='intent' value={dialogType === 'create' ? 'create' : 'update'} />
                   {dialogType === 'update' && (
                     <input type='hidden' name='id' value={selectedClass?.id} />
                   )}
+                  <input type='hidden' name='session_type' value={sessionType} />
+                  <input type='hidden' name='subject_id' value={selectedSubjectId} />
+                  <input type='hidden' name='class_id' value={selectedFormClassId} />
+                  <input type='hidden' name='teacher_id' value={selectedTeacherId} />
+                  <input type='hidden' name='school_id' value={selectedSchoolId} />
                   <div className='grid gap-4 py-4'>
                     <div className='grid gap-2'>
                       <Label htmlFor='title'>Lecture Title *</Label>
@@ -544,7 +599,15 @@ export default function ManageLiveClasses() {
 
                     <div className='grid gap-2'>
                       <Label htmlFor='session_type'>Session Type *</Label>
-                      <Select name='session_type' value={sessionType} onValueChange={setSessionType} required>
+                      <Select
+                        value={sessionType}
+                        onValueChange={(value) => {
+                          setSessionType(value)
+                          if (value === 'other_topic') {
+                            setSelectedSubjectId('')
+                          }
+                        }}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder='Select session type' />
                         </SelectTrigger>
@@ -569,7 +632,10 @@ export default function ManageLiveClasses() {
                     {sessionType === 'subject_specific' && (
                       <div className='grid gap-2'>
                         <Label htmlFor='subject_id'>Subject</Label>
-                        <Select name='subject_id' defaultValue={selectedClass?.subject_id?.toString()}>
+                        <Select
+                          value={selectedSubjectId}
+                          onValueChange={setSelectedSubjectId}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder='Select subject' />
                           </SelectTrigger>
@@ -587,9 +653,7 @@ export default function ManageLiveClasses() {
                     <div className='grid gap-2'>
                       <Label htmlFor='class_id'>Class *</Label>
                       <Select 
-                        name='class_id' 
-                        required 
-                        defaultValue={selectedClass?.class_id?.toString()}
+                        value={selectedFormClassId}
                         onValueChange={handleClassChange}
                       >
                         <SelectTrigger>
@@ -608,7 +672,7 @@ export default function ManageLiveClasses() {
                     {user.role_name !== 'teacher' && (
                       <div className='grid gap-2'>
                         <Label htmlFor='teacher_id'>Teacher *</Label>
-                        <Select name='teacher_id' required defaultValue={selectedClass?.teacher_id?.toString()}>
+                        <Select value={selectedTeacherId} onValueChange={setSelectedTeacherId}>
                           <SelectTrigger>
                             <SelectValue placeholder='Select teacher' />
                           </SelectTrigger>
@@ -626,7 +690,7 @@ export default function ManageLiveClasses() {
                     {(user.role_name === 'super_admin' || user.role_name === 'school_admin') && (
                       <div className='grid gap-2'>
                         <Label htmlFor='school_id'>School *</Label>
-                        <Select name='school_id' required>
+                        <Select value={selectedSchoolId} onValueChange={setSelectedSchoolId}>
                           <SelectTrigger>
                             <SelectValue placeholder='Select school' />
                           </SelectTrigger>
@@ -652,7 +716,9 @@ export default function ManageLiveClasses() {
                           name='start_time'
                           type='datetime-local'
                           required
-                          defaultValue={selectedClass?.start_time ? new Date(selectedClass.start_time).toISOString().slice(0, 16) : ''}
+                          defaultValue={formatLiveClassDateTimeForInput(
+                            selectedClass?.start_time
+                          )}
                         />
                       </div>
                       <div className='grid gap-2'>
@@ -662,7 +728,9 @@ export default function ManageLiveClasses() {
                           name='end_time'
                           type='datetime-local'
                           required
-                          defaultValue={selectedClass?.end_time ? new Date(selectedClass.end_time).toISOString().slice(0, 16) : ''}
+                          defaultValue={formatLiveClassDateTimeForInput(
+                            selectedClass?.end_time
+                          )}
                         />
                       </div>
                     </div>
@@ -793,10 +861,14 @@ export default function ManageLiveClasses() {
                         </TableCell>
                       )}
                       <TableCell className='text-center'>
-                        {lc.start_time ? new Date(lc.start_time).toLocaleString() : 'Not set'}
+                        {lc.start_time
+                          ? formatLiveClassDateTimeForDisplay(lc.start_time)
+                          : 'Not set'}
                       </TableCell>
                       <TableCell className='text-center'>
-                        {lc.end_time ? new Date(lc.end_time).toLocaleString() : 'Not set'}
+                        {lc.end_time
+                          ? formatLiveClassDateTimeForDisplay(lc.end_time)
+                          : 'Not set'}
                       </TableCell>
                       <TableCell className='text-center'>
                         {getStatusBadge(lc.status)}

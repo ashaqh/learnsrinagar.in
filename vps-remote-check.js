@@ -11,14 +11,19 @@ async function checkRemote() {
       readyTimeout: 10000
     });
 
-    console.log("=== Git Status ===");
-    let res = await ssh.execCommand('git status', { cwd: '/var/www/learnsrinagar.in' });
+    console.log("=== Disk Space ===");
+    let res = await ssh.execCommand('df -h /var/www/learnsrinagar.in');
     console.log(res.stdout);
-    if(res.stderr) console.error("ERR:", res.stderr);
 
-    console.log("=== Node Modules ===");
-    res = await ssh.execCommand('ls -la node_modules | head -n 5', { cwd: '/var/www/learnsrinagar.in' });
-    console.log(res.stdout);
+    console.log("=== MySQL Databases ===");
+    res = await ssh.execCommand('mysql -e "SHOW DATABASES;"');
+    console.log(res.stdout || "No databases found or command failed");
+    if(res.stderr) console.error("MySQL ERR:", res.stderr);
+
+    console.log("=== LearnSrinagar Table Check ===");
+    res = await ssh.execCommand('mysql -e "USE learnsrinagar; SHOW TABLES;"');
+    console.log(res.stdout || "No tables found");
+    if(res.stderr) console.error("Table ERR:", res.stderr);
 
     ssh.dispose();
   } catch (err) {

@@ -82,6 +82,26 @@ class _SendNotificationScreenState extends State<SendNotificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context);
+    final isSuperAdmin = auth.user?.roleName == 'super_admin';
+
+    if (!isSuperAdmin) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Send Notification'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Only super admins can send broadcast notifications.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Send Notification'),
@@ -115,7 +135,7 @@ class _SendNotificationScreenState extends State<SendNotificationScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _targetType,
+                initialValue: _targetType,
                 decoration: const InputDecoration(
                   labelText: 'Target Audience',
                   border: OutlineInputBorder(),
