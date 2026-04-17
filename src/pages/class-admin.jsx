@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import bcrypt from 'bcryptjs'
 import { query, transaction } from '@/lib/db'
 import { getUser } from '@/lib/auth'
+import { getClassesForSchool } from '@/services/classQuery.server'
 import {
   useLoaderData,
   useSubmit,
@@ -79,9 +80,7 @@ export async function loader({ request }) {
   const schools = schoolId
     ? await query('SELECT id, name FROM schools WHERE id = ?', [schoolId])
     : await query('SELECT id, name FROM schools')
-  const classes = schoolId
-    ? await query('SELECT id, name FROM classes WHERE school_id = ?', [schoolId])
-    : await query('SELECT id, name FROM classes')
+  const classes = await getClassesForSchool(schoolId)
 
   let classAdminsSql = `
     SELECT ca.id,

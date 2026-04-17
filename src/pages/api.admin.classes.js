@@ -1,6 +1,7 @@
 import { json } from "@remix-run/node"
 import { query } from "@/lib/db"
 import { verifyToken } from "@/lib/auth"
+import { classesTableSupportsSchoolId } from "@/services/classQuery.server"
 
 async function authorize(request) {
   const authHeader = request.headers.get("Authorization")
@@ -45,8 +46,13 @@ export async function action({ request }) {
       const school_id = user.role_name === 'school_admin' ? user.school_id : (data.school_id || null)
       
       if (!name) return json({ success: false, message: 'Name is required' }, { status: 400 })
-      
-      await query(`INSERT INTO classes (name, school_id) VALUES (?, ?)`, [name, school_id])
+
+      if (await classesTableSupportsSchoolId()) {
+        await query(`INSERT INTO classes (name, school_id) VALUES (?, ?)`, [name, school_id])
+      } else {
+        await query(`INSERT INTO classes (name) VALUES (?)`, [name])
+      }
+
       return json({ success: true, message: 'Class created successfully' })
     }
 

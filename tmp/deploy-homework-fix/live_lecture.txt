@@ -1,0 +1,166 @@
+Feature Concept: Live Classes Integration in School Management System
+ Overview
+
+The Live Classes feature allows authorized users (Super Admin, School Admin, Class Teachers, and Subject Teachers) to schedule or share YouTube Live Lecture Links directly within the school management system.
+Students can then view these live lectures seamlessly inside the student portal, without leaving the platform.
+
+ Objective
+
+To provide an integrated platform where teachers can conduct and share live classes (via YouTube Live), ensuring students have a unified learning experience — all within the existing school management system.
+
+ User Roles & Permissions
+1. Super Admin
+
+Can view and manage all live sessions across all schools.
+
+Can add, edit, or remove live lecture links for any school or section.
+
+Can monitor overall live class usage and analytics.
+
+Has access to all teacher and student live session data.
+
+2. School Admin
+
+Can create and manage live lecture links for their specific school.
+
+Can view all ongoing or scheduled live sessions within the school.
+
+Can approve or deactivate sessions created by teachers.
+
+Can filter live sessions by class, section, or teacher.
+
+3. Class Teacher
+
+Can create live session links for the classes they are responsible for.
+
+Can view all sessions associated with their class.
+
+Can take sessions related to any subject taught within their class.
+
+Can optionally collaborate with subject teachers for combined sessions.
+
+4. Subject Teacher
+
+Can create live sessions specifically for their assigned subjects.
+
+Can choose between two session types:
+
+Subject-Specific Session: A session related to the subject they teach.
+
+Other Topic Session: A session on an additional topic beyond their subject area.
+
+Must specify the Topic Title while scheduling the session.
+
+Can associate each live session with a specific class and section.
+
+5. Students
+
+Can view live sessions assigned to their class and section directly in their panel.
+
+Can join and watch the live YouTube stream embedded inside the platform.
+
+Can view session details (subject, teacher name, topic, start time).
+
+Can see session status: “Live Now”, “Upcoming”, or “Completed”.
+
+ Functional Flow
+A. Setup & Configuration
+
+The Super Admin enables the “Live Classes” module for the school.
+
+School Admins or Teachers access the Live Classes Dashboard in their respective panels.
+
+B. Creating a Live Session
+
+Authorized user (Super Admin / School Admin / Teacher) clicks “Add New Live Session”.
+
+The system prompts for:
+
+Title / Topic Name
+
+YouTube Live Link
+
+Session Type: Subject-Specific or Other Topic
+
+Class and Section selection
+
+Subject (if applicable)
+
+Start and End Time (optional)
+
+The user submits the form.
+
+The session details are saved and displayed in the “Live Lectures” list for the respective class and section.
+
+C. Displaying to Students
+
+When students log in to their portal:
+
+They navigate to “Live Classes” in their dashboard.
+
+The system automatically shows:
+
+Currently active sessions for their class and section.
+
+Upcoming sessions (if scheduled with start times).
+
+Students can click on the session to watch it directly embedded on the site (via YouTube iframe).
+
+D. Session Lifecycle
+
+Active Session: Visible to students while live streaming is active.
+
+Ended Session: Automatically marked as completed once the teacher ends the stream or manually deactivates it.
+
+Archived Session: Optionally, past live sessions can be stored or linked to recorded versions on YouTube for later viewing.
+
+ Key Features Summary
+Feature	Description
+Role-Based Access	Only authorized users (admins/teachers) can create or manage sessions.
+Flexible Topic Selection	Teachers can take sessions for their own subjects or any other topic if allowed.
+Embedded YouTube Integration	Students can watch live sessions directly inside the platform via an embedded YouTube player.
+Real-Time Visibility	Live sessions appear immediately on the relevant class and section dashboards.
+Session Categorization	Sessions organized by subject, class, section, and teacher.
+Scheduling Option	Teachers can schedule live lectures in advance.
+Admin Monitoring	School and Super Admins can monitor all live activity.
+Optional Recording Links	Recorded YouTube links can be added later for student review.
+
+ Optional Enhancements
+
+Notifications
+
+Automated email/SMS/push notifications when a live class starts.
+
+Session Status Indicators
+
+“Live Now”, “Upcoming”, “Ended”.
+
+Session Analytics
+
+Number of viewers, attendance tracking, engagement reports.
+
+Permission-Based Moderation
+
+School Admins can approve or reject teacher-added live sessions.
+
+Multi-Platform Expansion
+
+Future integration with Zoom, Google Meet, or Microsoft Teams.
+
+ Example User Flow Summary
+User	Action	Outcome
+Super Admin	Adds or monitors any school’s live class	Full control & overview
+School Admin	Creates or moderates school-level sessions	Controls school-level visibility
+Class Teacher	Adds class-specific live links	Manages live sessions for their class
+Subject Teacher	Adds subject or topic-based session links	Conducts and shares live classes
+Student	Views and attends live lectures	Learns in real-time within platform
+
+ Expected Outcome
+
+Centralized platform for live teaching.
+
+Seamless integration with YouTube Live.
+
+Reduced dependency on external meeting tools.
+
+Improved accessibility and engagement for students.

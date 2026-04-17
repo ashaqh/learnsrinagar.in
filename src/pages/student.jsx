@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import bcrypt from 'bcryptjs'
 import { query } from '@/lib/db'
 import { getUser } from '@/lib/auth'
+import { getClassesForSchool } from '@/services/classQuery.server'
 import {
   useLoaderData,
   useSubmit,
@@ -127,18 +128,14 @@ export async function loader({ request }) {
   const students = await query(studentsQuery, queryParams)
 
   // Get all classes or filter by user's class_ids if they exist
-  let classesQuery = `SELECT id, name FROM classes`
-  const classQueryParams = []
+  let classes = await getClassesForSchool(
+    user.class_ids && user.class_ids.length > 0 ? null : schoolId
+  )
 
   if (user.class_ids && user.class_ids.length > 0) {
-    classesQuery += ` WHERE id IN (${user.class_ids.map(() => '?').join(',')})`
-    classQueryParams.push(...user.class_ids)
-  } else if (schoolId) {
-    classesQuery += ` WHERE school_id = ?`
-    classQueryParams.push(schoolId)
+    const allowedClassIds = new Set(user.class_ids.map(String))
+    classes = classes.filter((cls) => allowedClassIds.has(String(cls.id)))
   }
-
-  const classes = await query(classesQuery, classQueryParams)
 
   // Get all schools or filter by user's school_id if they have one
   let schoolsQuery = `SELECT id, name FROM schools`

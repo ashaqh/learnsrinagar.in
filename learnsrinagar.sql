@@ -141,7 +141,7 @@ CREATE TABLE `live_classes` (
   `is_active` tinyint(1) DEFAULT '1',
   `created_by_role` enum('super_admin','school_admin','teacher') COLLATE utf8mb4_general_ci NOT NULL,
   `approved_by` int DEFAULT NULL,
-  `approval_status` enum('pending','approved','rejected') COLLATE utf8mb4_general_ci DEFAULT 'approved',
+  `zoom_link` text COLLATE utf8mb4_general_ci,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -502,6 +502,77 @@ LOCK TABLES `users` WRITE;
 INSERT INTO `users` VALUES (1,1,'Super Admin','super_admin@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 17:57:56'),(2,2,'BMS Noorbagh','bmsnoorbagh@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 17:59:11'),(3,4,'Ajaz Ahmad Guchay','ajazguchay@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 18:00:26'),(4,3,'Class Admin','class_admin@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 18:02:04'),(5,5,'Student','student@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 18:03:26'),(6,6,'Parent','parent@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-18 18:03:26'),(7,4,'Shahnawaz Ahmad Ganie','shahnawazahmad@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-19 08:33:35'),(8,5,'student2','student2@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-19 08:46:10'),(9,5,'student3','student3@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-19 08:51:25'),(10,3,'Class Admin2','class_admin2@gmail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-19 08:55:25'),(11,2,'BMS Kreshbal','bmskreshbal@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-19 09:24:51'),(12,2,'BMS Q. D. Pora','bmsqdpora@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:44:25'),(13,2,'BMS Zakoora','bmszakoora@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:44:54'),(14,2,'GMS Barzulla','gmsbarzulla@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:45:21'),(15,2,'BMS Soura','bmssoura@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:46:15'),(16,2,'GMS Saidakadal','gmssaidakadal@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:46:44'),(17,2,'BMS Batamaloo','bmsbatamaloo@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:47:10'),(18,2,'BMS Nowgam','bmsnowgam@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:47:37'),(19,2,'MS Panjkarwari','mspanjkarwari@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:48:05'),(21,2,'MS Khojabagh','mskhojabagh@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:48:32'),(22,2,'GMS Newtheed','gmsnewtheed@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-20 08:48:57'),(23,4,'Urfana Amin','urfanaamin@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-05-22 05:26:10'),(24,4,'Snober Mushtaq','snobermushtaq@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-07-10 06:08:15'),(25,4,'Syed Tajamul Andrabi','syedtajamul@learnsrinagar.in','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi','2025-07-10 06:12:23');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
+--
+-- Table structure for table `notifications`
+--
+DROP TABLE IF EXISTS `notifications`;
+CREATE TABLE `notifications` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `type` enum('system','manual') NOT NULL DEFAULT 'system',
+  `event_type` varchar(50) DEFAULT NULL,
+  `target_type` enum('all','role','group','class','school','user') NOT NULL,
+  `target_id` varchar(100) DEFAULT NULL,
+  `metadata` json DEFAULT NULL,
+  `created_by` int DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_notifications_created_at` (`created_at`),
+  KEY `idx_notifications_target` (`target_type`,`target_id`),
+  CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Table structure for table `user_notifications`
+--
+DROP TABLE IF EXISTS `user_notifications`;
+CREATE TABLE `user_notifications` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `notification_id` int NOT NULL,
+  `is_read` tinyint(1) DEFAULT '0',
+  `delivered_at` timestamp NULL DEFAULT NULL,
+  `read_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_user_notification` (`user_id`,`notification_id`),
+  KEY `idx_user_notifications_read` (`user_id`,`is_read`),
+  KEY `idx_user_notifications_notification` (`notification_id`),
+  CONSTRAINT `user_notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `user_notifications_ibfk_2` FOREIGN KEY (`notification_id`) REFERENCES `notifications` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Table structure for table `device_tokens`
+--
+DROP TABLE IF EXISTS `device_tokens`;
+CREATE TABLE `device_tokens` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `token` text NOT NULL,
+  `device_type` enum('android','ios','web') DEFAULT 'android',
+  `last_updated` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `token_unique` (`token`(255)),
+  KEY `idx_device_tokens_user_id` (`user_id`),
+  CONSTRAINT `device_tokens_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Table structure for table `notification_settings`
+--
+DROP TABLE IF EXISTS `notification_settings`;
+CREATE TABLE `notification_settings` (
+  `user_id` int NOT NULL,
+  `classes_enabled` tinyint(1) DEFAULT '1',
+  `blogs_enabled` tinyint(1) DEFAULT '1',
+  `feedback_enabled` tinyint(1) DEFAULT '1',
+  `is_muted` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`user_id`),
+  CONSTRAINT `notification_settings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 /*!50112 SET @disable_bulk_load = IF (@is_rocksdb_supported, 'SET SESSION rocksdb_bulk_load = @old_rocksdb_bulk_load', 'SET @dummy_rocksdb_bulk_load = 0') */;
 /*!50112 PREPARE s FROM @disable_bulk_load */;
 /*!50112 EXECUTE s */;
@@ -516,4 +587,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 23:27:24
+-- Dump completed on 2026-04-16 23:10:00

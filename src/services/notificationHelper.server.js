@@ -105,6 +105,38 @@ export async function getBlogNotification(title, category_id, author_id) {
   }
 }
 
+export async function getHomeworkNotification({
+  title,
+  classId,
+  subjectId,
+  teacherId,
+}) {
+  try {
+    const [classResult, subjectResult, teacherResult] = await Promise.all([
+      classId ? query('SELECT name FROM classes WHERE id = ?', [classId]) : [],
+      subjectId ? query('SELECT name FROM subjects WHERE id = ?', [subjectId]) : [],
+      teacherId ? query('SELECT name FROM users WHERE id = ?', [teacherId]) : [],
+    ])
+
+    const className = classResult?.[0]?.name || 'the selected class'
+    const subjectName = subjectResult?.[0]?.name || 'the selected subject'
+    const teacherName = teacherResult?.[0]?.name || 'Your teacher'
+
+    const templates = [
+      `${teacherName} has assigned new homework for ${className} in ${subjectName}: "${title}". Please check the homework section for details.`,
+      `New homework added for ${className}. ${teacherName} posted "${title}" in ${subjectName}. Open the app to review the assignment.`,
+      `Homework update: ${teacherName} shared a new ${subjectName} task for ${className} titled "${title}". Please take a look.`,
+      `A new homework assignment, "${title}", is now available for ${className} in ${subjectName}. Added by ${teacherName}.`,
+    ]
+
+    const randomIndex = Math.floor(Math.random() * templates.length)
+    return templates[randomIndex]
+  } catch (error) {
+    console.error('Error generating homework notification:', error)
+    return `New homework added: ${title}. Please check the homework section for details.`
+  }
+}
+
 export async function getSchoolLifecycleNotification({
   action,
   schoolName,

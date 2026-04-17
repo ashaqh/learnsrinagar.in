@@ -1,0 +1,27 @@
+﻿# npm audit report
+
+estree-util-value-to-estree  <3.3.3
+Severity: moderate
+estree-util-value-to-estree allows prototype pollution in generated ESTree - https://github.com/advisories/GHSA-f7f6-9jq7-3rqj
+fix available via `npm audit fix --force`
+Will install @remix-run/dev@2.13.1, which is a breaking change
+node_modules/estree-util-value-to-estree
+  remark-mdx-frontmatter  <=2.1.1
+  Depends on vulnerable versions of estree-util-value-to-estree
+  node_modules/remark-mdx-frontmatter
+    @remix-run/dev  *
+    Depends on vulnerable versions of remark-mdx-frontmatter
+    Depends on vulnerable versions of valibot
+    node_modules/@remix-run/dev
+
+valibot  0.31.0 - 1.1.0
+Severity: high
+Valibot has a ReDoS vulnerability in `EMOJI_REGEX` - https://github.com/advisories/GHSA-vqpr-j7v3-hqw9
+fix available via `npm audit fix --force`
+Will install @remix-run/dev@2.13.1, which is a breaking change
+node_modules/valibot
+
+4 vulnerabilities (2 moderate, 2 high)
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../models/teacher_assignment.dart';
 import '../providers/auth_provider.dart';
 import '../services/homework_service.dart';
 
@@ -16,6 +17,7 @@ class HomeworkScreen extends StatefulWidget {
 class _HomeworkScreenState extends State<HomeworkScreen> {
   final _homeworkService = HomeworkService();
   List<dynamic> _homeworkList = [];
+  List<TeacherAssignment> _assignedSubjects = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -49,8 +51,11 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
         setState(() {
           if (result['success'] == true) {
             _homeworkList = result['homework'] ?? [];
+            _assignedSubjects =
+                (result['assignedSubjects'] as List<TeacherAssignment>? ?? []);
           } else {
             _errorMessage = result['message']?.toString() ?? 'Failed to load homework';
+            _assignedSubjects = [];
           }
           _isLoading = false;
         });
@@ -59,6 +64,7 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
       if (mounted) {
         setState(() {
           _errorMessage = 'Error loading homework: $e';
+          _assignedSubjects = [];
           _isLoading = false;
         });
       }
@@ -282,53 +288,109 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
   void _showCreateHomeworkDialog() {
     final titleController = TextEditingController();
     final descController = TextEditingController();
+    TeacherAssignment? selectedAssignment = _assignedSubjects.isNotEmpty
+        ? _assignedSubjects.first
+        : null;
+
+    if (_assignedSubjects.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No assigned subject and class combinations are available for this teacher.',
+          ),
+        ),
+      );
+      return;
+    }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create Homework'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create Homework'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
                   controller: titleController,
-                  decoration: const InputDecoration(labelText: 'Title')),
-              TextField(
+                  decoration: const InputDecoration(labelText: 'Title'),
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  initialValue: selectedAssignment?.id,
+                  decoration: const InputDecoration(labelText: 'Subject'),
+                  items: _assignedSubjects
+                      .map(
+                        (assignment) => DropdownMenuItem<int>(
+                          value: assignment.id,
+                          child: Text(
+                            '${assignment.subjectName} (Class ${assignment.className})',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selectedAssignment = _assignedSubjects.firstWhere(
+                        (assignment) => assignment.id == value,
+                      );
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextField(
                   controller: descController,
                   decoration: const InputDecoration(labelText: 'Description'),
-                  maxLines: 3),
-            ],
+                  maxLines: 4,
+                  minLines: 3,
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (titleController.text.trim().isEmpty ||
+                    descController.text.trim().isEmpty ||
+                    selectedAssignment == null) {
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Title, subject, and description are required.',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+
+                final navigator = Navigator.of(dialogContext);
+                final messenger = ScaffoldMessenger.of(this.context);
+                final auth =
+                    Provider.of<AuthProvider>(this.context, listen: false);
+                final result = await _homeworkService.createHomework(
+                  auth.token!,
+                  selectedAssignment!.classId,
+                  selectedAssignment!.subjectId,
+                  titleController.text.trim(),
+                  descController.text.trim(),
+                );
+                if (!mounted) return;
+                navigator.pop();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(result['message'])),
+                );
+                _fetchHomework();
+              },
+              child: const Text('Create'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              if (titleController.text.isEmpty || widget.classId == null) return;
-              final navigator = Navigator.of(context);
-              final messenger = ScaffoldMessenger.of(context);
-              final auth =
-                  Provider.of<AuthProvider>(context, listen: false);
-              final result = await _homeworkService.createHomework(
-                auth.token!,
-                widget.classId!,
-                1, // Subject ID - should come from selection
-                titleController.text,
-                descController.text,
-                DateTime.now().toString().split(' ')[0],
-              );
-              if (!mounted) return;
-              navigator.pop();
-              messenger.showSnackBar(
-                  SnackBar(content: Text(result['message'])));
-              _fetchHomework();
-            },
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
   }

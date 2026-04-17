@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Route Test</title>
+</head>
+<body>
+    <h1>Route Test Page</h1>
+    <p>If you can see this page by accessing /route-test.html, your server is working.</p>
+    <p>If clicking the login button doesn't work, the issue is likely:</p>
+    <ul>
+        <li>Client-side routing not configured on server</li>
+        <li>JavaScript not loading properly</li>
+        <li>Build files not deployed correctly</li>
+    </ul>
+    
+    <script>
+        console.log('JavaScript is working');
+        // Test if we can access the login route directly
+        setTimeout(() => {
+            console.log('Testing direct navigation to login...');
+            // This would normally be handled by React Router
+        }, 1000);
+    </script>
+</body>
+</html>

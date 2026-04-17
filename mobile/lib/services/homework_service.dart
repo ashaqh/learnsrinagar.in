@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
+import '../models/teacher_assignment.dart';
 
 class HomeworkService {
   final String baseUrl = '${AppConfig.apiBaseUrl}/homework';
@@ -23,7 +24,13 @@ class HomeworkService {
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
-        return {'success': true, 'homework': data['homework']};
+        return {
+          'success': true,
+          'homework': data['homework'],
+          'assignedSubjects': (data['assignedSubjects'] as List? ?? [])
+              .map((item) => TeacherAssignment.fromJson(item))
+              .toList(),
+        };
       } else {
         return {'success': false, 'message': data['error'] ?? 'Failed to fetch homework'};
       }
@@ -37,8 +44,7 @@ class HomeworkService {
     int classId, 
     int subjectId, 
     String title, 
-    String description, 
-    String dueDate
+    String description
   ) async {
     try {
       final response = await http.post(
@@ -52,7 +58,6 @@ class HomeworkService {
           'subjectId': subjectId,
           'title': title,
           'description': description,
-          'dueDate': dueDate,
         }),
       );
 

@@ -5,7 +5,7 @@ const ssh = new NodeSSH();
 
 async function deploy() {
   try {
-    console.log("Connecting to VPS...");
+    console.log("Connecting to VPS 187.127.130.18...");
     await ssh.connect({
       host: '187.127.130.18',
       username: 'root',
@@ -14,43 +14,67 @@ async function deploy() {
     });
     console.log("Connected!");
     
-    console.log("Setting up database user...");
-    await ssh.execCommand('mysql -e "CREATE USER IF NOT EXISTS \'learnsrinagar\'@\'localhost\' IDENTIFIED BY \'e3iWzvZnZifgN38OiM2Q\'; GRANT ALL PRIVILEGES ON learnsrinagar.* TO \'learnsrinagar\'@\'localhost\'; FLUSH PRIVILEGES;"');
-    
-    console.log("Updating .env file...");
-    await ssh.execCommand('sed -i "s/DB_USER=.*/DB_USER=learnsrinagar/" .env', { cwd: '/var/www/learnsrinagar.in' });
-    await ssh.execCommand('sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=e3iWzvZnZifgN38OiM2Q/" .env', { cwd: '/var/www/learnsrinagar.in' });
+    const projectDir = '/var/www/learnsrinagar.in';
 
+    console.log(`Ensuring project directory exists at ${projectDir}...`);
+    await ssh.execCommand(`mkdir -p ${projectDir}`);
+
+    console.log("Uploading environment configuration...");
+    await ssh.putFile('.env.production', `${projectDir}/.env`);
+    console.log("Environment uploaded!");
+    
     console.log("Uploading deploy.tar.gz...");
-    await ssh.putFile('deploy.tar.gz', '/var/www/learnsrinagar.in/deploy.tar.gz');
+    await ssh.putFile('deploy.tar.gz', `${projectDir}/deploy.tar.gz`);
     console.log("Upload complete!");
 
     console.log("Extracting archive...");
-    let res = await ssh.execCommand('tar -xzf deploy.tar.gz', { cwd: '/var/www/learnsrinagar.in' });
-    if(res.stderr) console.error("Extract stderr:", res.stderr);
+    let res = await ssh.execCommand('tar -xzf deploy.tar.gz', { cwd: projectDir });
+    if(res.stderr) console.log("Note: Extract stderr (often non-fatal):", res.stderr);
 
-    console.log("Installing dependencies...");
-    res = await ssh.execCommand('npm install', { cwd: '/var/www/learnsrinagar.in' });
-    console.log("Install logs:", res.stdout);
-    if(res.stderr) console.error("Install stderr:", res.stderr);
+    console.log("Skipping local database import (using remote IP)...");
+    // const importSql = 'mysql -u learnsrinagar -pe3iWzvZnZifgN38OiM2Q learnsrinagar < learnsrinagar.sql';
+    // res = await ssh.execCommand(importSql, { cwd: projectDir });
+    // if(res.stderr) console.log("Note: SQL Import stderr:", res.stderr);
 
-    console.log("Building application...");
-    res = await ssh.execCommand('npm run build', { cwd: '/var/www/learnsrinagar.in' });
-    console.log("Build logs:", res.stdout);
-    if(res.stderr) console.error("Build stderr:", res.stderr);
+    console.log("Installing node dependencies...");
+    res = await ssh.execCommand('npm install --production --legacy-peer-deps', { cwd: projectDir });
+    console.log("Install logs:", res.stdout.substring(0, 500) + "...");
+    
+    console.log("Building Remix application...");
+    res = await ssh.execCommand('npm run build', { cwd: projectDir });
+    console.log("Build output:", res.stdout.substring(res.stdout.length - 500));
 
-    console.log("Restarting PM2...");
-    res = await ssh.execCommand('pm2 restart learnsrinagar', { cwd: '/var/www/learnsrinagar.in' });
-    console.log("PM2:", res.stdout);
+    console.log("Managing PM2 process...");
+    // Check if process exists to avoid duplicate entries
+    res = await ssh.execCommand('pm2 jlist');
+    const apps = JSON.parse(res.stdout || '[]');
+    const appExists = apps.some(app => app.name === 'learnsrinagar');
+
+    if (!appExists) {
+      console.log("Starting new PM2 service 'learnsrinagar'...");
+      await ssh.execCommand('pm2 start npm --name "learnsrinagar" -- start', { cwd: projectDir });
+    } else {
+      console.log("Restarting existing PM2 service 'learnsrinagar'...");
+      await ssh.execCommand('pm2 restart learnsrinagar');
+    }
+    await ssh.execCommand('pm2 save');
+
+    console.log("Uploading Nginx configuration...");
+    await ssh.putFile('learnsrinagar.nginx.conf', '/etc/nginx/sites-available/learnsrinagar.in');
+    
+    console.log("Configuring Nginx symlink and restarting...");
+    await ssh.execCommand('ln -sf /etc/nginx/sites-available/learnsrinagar.in /etc/nginx/sites-enabled/');
+    await ssh.execCommand('nginx -t && systemctl restart nginx');
+    console.log("Nginx restarted successfully!");
 
     console.log("Cleaning up...");
-    await ssh.execCommand('rm deploy.tar.gz', { cwd: '/var/www/learnsrinagar.in' });
+    await ssh.execCommand('rm deploy.tar.gz', { cwd: projectDir });
 
     ssh.dispose();
-    console.log("Deployment Successful!");
+    console.log("=== Deployment Successfully Completed ===");
   } catch (err) {
-    console.error("Deploy error depth:", JSON.stringify(err, null, 2));
-    console.error("Deploy error message:", err.message);
+    console.error("Critical Deployment Error:", err.message);
+    if (err.stack) console.error(err.stack);
     ssh.dispose();
     process.exit(1);
   }

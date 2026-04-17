@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'services/notification_service.dart';
 import 'screens/notifications_screen.dart';
@@ -53,6 +54,9 @@ class _LearnSrinagarAppState extends State<LearnSrinagarApp> {
       ),
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
+          if (auth.isInitializing) {
+            return const SplashScreen();
+          }
           if (auth.isAuthenticated) {
             return const DashboardScreen();
           } else {

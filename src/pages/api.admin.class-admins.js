@@ -4,6 +4,7 @@ import { verifyToken } from "@/lib/auth"
 import bcrypt from 'bcryptjs'
 import { notificationService } from "@/services/notificationService.server"
 import { getClassAdminLifecycleNotification } from "@/services/notificationHelper.server"
+import { getClassesForSchool } from "@/services/classQuery.server"
 
 async function authorize(request) {
   const authHeader = request.headers.get("Authorization")
@@ -71,9 +72,7 @@ export async function loader({ request }) {
     const classAdmins = await query(sql, params)
     
     // Also fetch classes and schools for dropdowns if needed
-    const classes = school_id
-      ? await query('SELECT id, name FROM classes WHERE school_id = ? ORDER BY name', [school_id])
-      : await query('SELECT id, name FROM classes ORDER BY name')
+    const classes = await getClassesForSchool(school_id)
     const schools = school_id
       ? await query('SELECT id, name FROM schools WHERE id = ? ORDER BY name', [school_id])
       : await query('SELECT id, name FROM schools ORDER BY name')

@@ -100,18 +100,27 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
   }
 
   List<dynamic> get _filteredLiveClasses {
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    final isTeacher = user?.roleName == 'teacher';
+
     return _updatedLiveClasses.where((lc) {
       final matchesSearch = _searchQuery.isEmpty ||
           (lc['title']?.toString().toLowerCase().contains(_searchQuery.toLowerCase()) ?? false) ||
           (lc['topic_name']?.toString().toLowerCase().contains(_searchQuery.toLowerCase()) ?? false) ||
           (lc['teacher_name']?.toString().toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
-          
-      final matchesSubject = _selectedSubject == 'all' || 
+
+      final matchesSubject = _selectedSubject == 'all' ||
           lc['subject_id']?.toString() == _selectedSubject;
-          
-      final matchesStatus = _selectedStatus == 'all' || 
-          lc['computed_status'] == _selectedStatus ||
-          (_selectedStatus == 'upcoming' && lc['computed_status'] == 'scheduled');
+
+      // For teachers, show all classes unless filtering by specific status
+      final matchesStatus;
+      if (isTeacher && _selectedStatus == 'all') {
+        matchesStatus = true; // Show all statuses for teachers when no filter applied
+      } else {
+        matchesStatus = _selectedStatus == 'all' ||
+            lc['computed_status'] == _selectedStatus ||
+            (_selectedStatus == 'upcoming' && lc['computed_status'] == 'scheduled');
+      }
 
       return matchesSearch && matchesSubject && matchesStatus;
     }).toList();
@@ -122,6 +131,7 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
     final user = Provider.of<AuthProvider>(context).user;
     final canSchedule =
         user?.roleName == 'school_admin' || user?.roleName == 'class_admin';
+    final isTeacher = user?.roleName == 'teacher';
 
     final filtered = _filteredLiveClasses;
     final liveSessions = filtered.where((lc) => lc['computed_status'] == 'live').toList();

@@ -1,0 +1,24 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "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",
+    "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "nvidia/nemotron-3-super-120b-a12b:free",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "nvidia/nemotron-3-super-120b-a12b:free",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "nvidia/nemotron-3-super-120b-a12b:free"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cscript:*)",
+      "Bash(where python:*)",
+      "Bash(schtasks:*)",
+      "Bash(dir /x \"C:\\\\Users\\\\WIN11\\\\AppData\\\\Local\\\\Python\")",
+      "Bash(dir /x \"C:\\\\Users\\\\WIN11\\\\Desktop\\\\Auto approve\")",
+      "Bash(cmd:*)",
+      "Bash(where schtasks:*)",
+      "Bash(C:\\\\Windows\\\\System32\\\\schtasks.exe:*)",
+      "Bash(powershell:*)",
+      "Bash(python auto_review_browser.py)",
+      "Bash(ls:*)"
+    ]
+  }
+}

@@ -47,6 +47,14 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from '@/components/ui/table'
 
 async function loadLearnerDashboard({
   activeStudentId,
@@ -117,7 +125,7 @@ async function loadLearnerDashboard({
      FROM homework h
      JOIN subjects s ON h.subject_id = s.id
      JOIN users u ON h.teacher_id = u.id
-     WHERE s.class_id = ?
+     WHERE COALESCE(h.class_id, s.class_id) = ?
      ORDER BY h.created_at DESC LIMIT 5`,
     [classId]
   )
@@ -160,10 +168,11 @@ async function loadTeacherDashboard(teacherId) {
             h.description,
             h.created_at,
             s.name as subject_name,
-            c.name as class_name
+            COALESCE(ch.name, cs.name, 'Unassigned Class') as class_name
      FROM homework h
      JOIN subjects s ON h.subject_id = s.id
-     JOIN classes c ON s.class_id = c.id
+     LEFT JOIN classes cs ON s.class_id = cs.id
+     LEFT JOIN classes ch ON h.class_id = ch.id
      WHERE h.teacher_id = ?
      ORDER BY h.created_at DESC`,
     [teacherId]
@@ -176,6 +185,10 @@ async function loadTeacherDashboard(teacherId) {
             lc.topic_name,
             IFNULL(s.name, lc.topic_name) as subject_name,
             COALESCE(c.name, 'Unassigned Class') as class_name,
+            u.name as teacher_name,
+            CASE WHEN lc.is_all_schools = 1 THEN 'All Schools' ELSE sch.name END as school_names,
+            (SELECT COUNT(*) FROM schools) as total_school_count,
+            lc.is_all_schools,
             lc.start_time,
             lc.end_time,
             lc.status,
@@ -184,6 +197,8 @@ async function loadTeacherDashboard(teacherId) {
      FROM live_classes lc
      LEFT JOIN subjects s ON lc.subject_id = s.id
      LEFT JOIN classes c ON lc.class_id = c.id
+     JOIN users u ON lc.teacher_id = u.id
+     LEFT JOIN schools sch ON lc.school_id = sch.id
      WHERE lc.teacher_id = ?
        AND lc.start_time IS NOT NULL
      ORDER BY lc.start_time DESC`,
@@ -1421,6 +1436,7 @@ function TeacherDashboard({
 }) {
   const [dateRange, setDateRange] = useState(undefined)
   const [isMobile, setIsMobile] = useState(false)
+  const [liveClassStatus, setLiveClassStatus] = useState('all')
   const isDateFiltered = Boolean(dateRange?.from || dateRange?.to)
 
   useEffect(() => {
@@ -1490,7 +1506,12 @@ function TeacherDashboard({
     .sort((a, b) => parseTeacherDate(b.created_at) - parseTeacherDate(a.created_at))
 
   const filteredTimetable = [...timetable]
-    .filter((item) => isWithinDateRange(item.start_time))
+    .filter((item) => {
+      if (!isWithinDateRange(item.start_time)) return false
+      if (liveClassStatus === 'upcoming') return item.dashboard_status !== 'completed'
+      if (liveClassStatus === 'completed') return item.dashboard_status === 'completed'
+      return true
+    })
     .sort((a, b) => parseTeacherDate(b.start_time) - parseTeacherDate(a.start_time))
 
   const onDateRangeChange = (range) => {
@@ -1567,6 +1588,27 @@ function TeacherDashboard({
                 </Button>
               ) : null}
             </div>
+            <div className='flex flex-col gap-1'>
+              <div className='text-xs text-muted-foreground'>Live Class Status</div>
+              <div className='flex gap-2 flex-wrap'>
+                {[
+                  { value: 'all', label: 'All' },
+                  { value: 'upcoming', label: 'Upcoming' },
+                  { value: 'completed', label: 'Completed' },
+                ].map((opt) => (
+                  <Button
+                    key={opt.value}
+                    id={`teacher-live-status-${opt.value}`}
+                    size='sm'
+                    variant={liveClassStatus === opt.value ? 'default' : 'outline'}
+                    className='text-xs px-3 py-1 h-7'
+                    onClick={() => setLiveClassStatus(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
         </Card>
       </div>
@@ -1583,7 +1625,7 @@ function TeacherDashboard({
           </TabsTrigger>
           <TabsTrigger value='timetable' className='flex items-center gap-2 text-xs sm:text-sm'>
             <Clock className='h-4 w-4' />
-            <span>Timetable</span>
+            <span>Live Classes</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1731,60 +1773,92 @@ function TeacherDashboard({
         <TabsContent value='timetable' className='space-y-6'>
           <Card>
             <CardHeader>
-              <CardTitle className='text-lg'>Timetable</CardTitle>
+              <CardTitle className='text-lg'>Assigned Live Classes</CardTitle>
               <CardDescription>
-                Your live-class schedule in descending date order
+                {liveClassStatus === 'upcoming'
+                  ? 'Upcoming scheduled live classes in descending date order'
+                  : liveClassStatus === 'completed'
+                  ? 'Completed live classes in descending date order'
+                  : 'All assigned live classes (upcoming and completed) in descending date order'}
               </CardDescription>
             </CardHeader>
-            <CardContent className='space-y-4'>
+            <CardContent>
               {filteredTimetable.length > 0 ? (
-                filteredTimetable.map((item) => {
-                  const status = item.dashboard_status === 'completed'
-                    ? 'completed'
-                    : 'scheduled'
-                  const statusClasses = status === 'completed'
-                    ? 'bg-rose-100 text-rose-700 hover:bg-rose-100'
-                    : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
+                <div className='overflow-x-auto'>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Topic</TableHead>
+                        <TableHead>Class</TableHead>
+                        <TableHead>Teacher</TableHead>
+                        <TableHead>Schools</TableHead>
+                        <TableHead>Start Time</TableHead>
+                        <TableHead>End Time</TableHead>
+                        <TableHead className='text-right'>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTimetable.map((item) => {
+                        const isCompleted = item.dashboard_status === 'completed'
+                        const statusColor = isCompleted
+                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                          : 'bg-blue-100 text-blue-700 border-blue-200'
+                        
+                        const schoolDisplay = item.is_all_schools
+                          ? `All Schools (${item.total_school_count || 12})`
+                          : item.school_names || 'Unknown School'
 
-                  return (
-                    <div key={item.id} className='rounded-lg border p-4 space-y-3'>
-                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-                        <div>
-                          <div className='font-semibold'>
-                            {item.topic_name || item.title || item.subject_name}
-                          </div>
-                          <div className='text-sm text-muted-foreground'>
-                            {item.subject_name} • Class {item.class_name}
-                          </div>
-                        </div>
-                        <Badge className={statusClasses}>
-                          {status === 'completed' ? 'Completed' : 'Scheduled'}
-                        </Badge>
-                      </div>
-                      <div className='text-sm text-muted-foreground'>
-                        {format(parseTeacherDate(item.start_time), 'EEEE, MMM dd, yyyy')} •{' '}
-                        {format(parseTeacherDate(item.start_time), 'hh:mm a')}
-                        {item.end_time ? ` - ${format(parseTeacherDate(item.end_time), 'hh:mm a')}` : ''}
-                      </div>
-                      {(item.zoom_link || item.youtube_live_link) && (
-                        <Button
-                          variant='outline'
-                          className='w-full sm:w-auto'
-                          onClick={() =>
-                            window.open(item.zoom_link || item.youtube_live_link, '_blank')
-                          }
-                        >
-                          Open Session <ExternalLink className='ml-2 h-4 w-4' />
-                        </Button>
-                      )}
-                    </div>
-                  )
-                })
+                        return (
+                          <TableRow key={item.id} className='cursor-pointer hover:bg-muted/50' onClick={() => {
+                            if (item.zoom_link || item.youtube_live_link) {
+                              window.open(item.zoom_link || item.youtube_live_link, '_blank')
+                            }
+                          }}>
+                            <TableCell className='font-bold'>{item.title}</TableCell>
+                            <TableCell>{item.topic_name || item.subject_name}</TableCell>
+                            <TableCell>{item.class_name}</TableCell>
+                            <TableCell>{item.teacher_name}</TableCell>
+                            <TableCell>{schoolDisplay}</TableCell>
+                            <TableCell>
+                              {item.start_time ? format(parseTeacherDate(item.start_time), 'dd/MM/yyyy, hh:mm a') : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              {item.end_time ? format(parseTeacherDate(item.end_time), 'dd/MM/yyyy, hh:mm a') : 'N/A'}
+                            </TableCell>
+                            <TableCell className='text-right'>
+                              <div className='flex items-center justify-end gap-2'>
+                                <Badge className={`${statusColor} flex items-center gap-1 justify-center w-28`}>
+                                  {isCompleted ? <CheckCircle2 className='h-3 w-3' /> : <Clock className='h-3 w-3' />}
+                                  {isCompleted ? 'Complete' : 'Upcoming'}
+                                </Badge>
+                                {(item.zoom_link || item.youtube_live_link) && !isCompleted && (
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    className='h-8 px-2 text-xs gap-1 border-blue-200 text-blue-600 hover:bg-blue-50'
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(item.zoom_link || item.youtube_live_link, '_blank');
+                                    }}
+                                  >
+                                    <Video className='h-3.5 w-3.5' />
+                                    Join
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               ) : (
-                <p className='text-center text-muted-foreground py-4'>
-                  {isDateFiltered
-                    ? 'No timetable entries found for the selected range. Clear the date filter to view all records.'
-                    : 'No timetable entries found.'}
+                <p className='text-center text-muted-foreground py-8'>
+                  {isDateFiltered || liveClassStatus !== 'all'
+                    ? 'No live classes found matching your filters.'
+                    : 'No assigned live classes found.'}
                 </p>
               )}
             </CardContent>
