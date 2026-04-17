@@ -31,14 +31,13 @@ async function deploy() {
     let res = await ssh.execCommand('tar -xzf deploy.tar.gz', { cwd: projectDir });
     if(res.stderr) console.log("Note: Extract stderr (often non-fatal):", res.stderr);
 
-    console.log("Skipping local database import (using remote IP)...");
-    // const importSql = 'mysql -u learnsrinagar -pe3iWzvZnZifgN38OiM2Q learnsrinagar < learnsrinagar.sql';
-    // res = await ssh.execCommand(importSql, { cwd: projectDir });
-    // if(res.stderr) console.log("Note: SQL Import stderr:", res.stderr);
-
     console.log("Installing node dependencies...");
     res = await ssh.execCommand('npm install --production --legacy-peer-deps', { cwd: projectDir });
     console.log("Install logs:", res.stdout.substring(0, 500) + "...");
+
+    console.log("Running database migrations/updates...");
+    res = await ssh.execCommand('node update_db.js', { cwd: projectDir });
+    console.log("Migration output:", res.stdout || res.stderr);
     
     console.log("Building Remix application...");
     res = await ssh.execCommand('npm run build', { cwd: projectDir });

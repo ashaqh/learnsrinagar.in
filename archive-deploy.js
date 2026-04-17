@@ -9,7 +9,6 @@ const filesToInclude = [
   'jsconfig.json',
   'server-config.js',
   'start-production.sh',
-  'learnsrinagar.sql',
   '.env.example',
   'service-account.json'
 ];
