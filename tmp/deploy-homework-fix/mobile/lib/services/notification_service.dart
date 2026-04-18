@@ -73,11 +73,9 @@ class NotificationService {
 
     // Get FCM Token (don't sync yet - user might not be logged in)
     String? token = await _fcm.getToken();
-    if (kDebugMode) print('FCM Token: ${token?.substring(0, 20)}...');
-    if (token != null) {
-      await _storage.write(key: 'fcm_token', value: token);
-    }
-
+    if (kDebugMode) print('FCM Token: ${token.substring(0, 20)}...');
+    await _storage.write(key: 'fcm_token', value: token);
+  
     // Listen for token refreshes and store locally
     _fcm.onTokenRefresh.listen((newToken) async {
       if (kDebugMode) print('FCM Token refreshed: ${newToken.substring(0, 20)}...');

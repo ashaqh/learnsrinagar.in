@@ -12,7 +12,8 @@ import '../main.dart'; // To access navigatorKey
 class NotificationService {
   static final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   static const _storage = FlutterSecureStorage();
-  static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
   static Future<void> initialize() async {
     // Listen for background notification tap
@@ -27,8 +28,11 @@ class NotificationService {
 
     // Initialize Local Notifications for Heads-Up and Foreground
     // Initialize local notifications
-    const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initSettings = InitializationSettings(android: androidSettings);
+    const AndroidInitializationSettings androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidSettings,
+    );
     await _localNotifications.initialize(
       settings: initSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
@@ -45,14 +49,18 @@ class NotificationService {
       playSound: true,
       enableVibration: true,
     );
-    
+
     await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(channel);
 
     // Request Android 13+ Notification Permissions
     final granted = await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.requestNotificationsPermission();
     if (kDebugMode) print('Local notification permission granted: $granted');
 
@@ -62,7 +70,8 @@ class NotificationService {
       badge: true,
       sound: true,
     );
-    if (kDebugMode) print('FCM permission status: ${settings.authorizationStatus}');
+    if (kDebugMode)
+      print('FCM permission status: ${settings.authorizationStatus}');
 
     // Configure FCM to NOT auto-show heads-up (we do it ourselves via flutter_local_notifications)
     // This ensures foreground notifications also make sound/vibration
@@ -74,14 +83,19 @@ class NotificationService {
 
     // Get FCM Token (don't sync yet - user might not be logged in)
     String? token = await _fcm.getToken();
-    if (kDebugMode) print('FCM Token: ${token?.substring(0, 20)}...');
-    if (token != null) {
-      await _storage.write(key: 'fcm_token', value: token);
+    if (kDebugMode) {
+      if (token != null && token.length >= 20) {
+        print('FCM Token: ${token.substring(0, 20)}...');
+      } else {
+        print('FCM Token: $token');
+      }
     }
+    await _storage.write(key: 'fcm_token', value: token);
 
     // Listen for token refreshes and store locally
     _fcm.onTokenRefresh.listen((newToken) async {
-      if (kDebugMode) print('FCM Token refreshed: ${newToken.substring(0, 20)}...');
+      if (kDebugMode)
+        print('FCM Token refreshed: ${newToken.substring(0, 20)}...');
       await _storage.write(key: 'fcm_token', value: newToken);
       // Try to sync if user is already logged in
       await syncTokenWithBackend();
@@ -97,7 +111,7 @@ class NotificationService {
         print('    Title: ${message.notification?.title}');
         print('    Body: ${message.notification?.body}');
       }
-      
+
       RemoteNotification? notification = message.notification;
 
       if (notification != null) {
@@ -109,7 +123,8 @@ class NotificationService {
             android: AndroidNotificationDetails(
               'high_importance_channel',
               'High Importance Notifications',
-              channelDescription: 'This channel is used for important notifications.',
+              channelDescription:
+                  'This channel is used for important notifications.',
               icon: '@mipmap/ic_launcher',
               importance: Importance.high,
               priority: Priority.high,
@@ -130,44 +145,60 @@ class NotificationService {
     var fcmToken = await _storage.read(key: 'fcm_token');
 
     if (kDebugMode) {
-      print('[FCM-SYNC] jwt present: ${jwt != null}, fcmToken present: ${fcmToken != null}');
+      print(
+        '[FCM-SYNC] jwt present: ${jwt != null}, fcmToken present: ${fcmToken != null}',
+      );
     }
 
     // If FCM token not in storage, try to fetch it directly from Firebase
     if (fcmToken == null) {
-      if (kDebugMode) print('[FCM-SYNC] FCM token missing from storage, fetching from Firebase...');
+      if (kDebugMode)
+        print(
+          '[FCM-SYNC] FCM token missing from storage, fetching from Firebase...',
+        );
       try {
         fcmToken = await _fcm.getToken();
         if (fcmToken != null) {
           await _storage.write(key: 'fcm_token', value: fcmToken);
-          if (kDebugMode) print('[FCM-SYNC] Fetched and stored FCM token: ${fcmToken.substring(0, 20)}...');
+          if (kDebugMode)
+            print(
+              '[FCM-SYNC] Fetched and stored FCM token: ${fcmToken.substring(0, 20)}...',
+            );
         } else {
-          if (kDebugMode) print('[FCM-SYNC] Firebase returned null token. Check Google Play Services / device setup.');
+          if (kDebugMode)
+            print(
+              '[FCM-SYNC] Firebase returned null token. Check Google Play Services / device setup.',
+            );
         }
       } catch (e) {
-        if (kDebugMode) print('[FCM-SYNC] Error fetching FCM token from Firebase: $e');
+        if (kDebugMode)
+          print('[FCM-SYNC] Error fetching FCM token from Firebase: $e');
       }
     } else {
-      if (kDebugMode) print('[FCM-SYNC] fcmToken prefix: ${fcmToken.substring(0, 30)}...');
+      if (kDebugMode)
+        print('[FCM-SYNC] fcmToken prefix: ${fcmToken.substring(0, 30)}...');
     }
 
     if (jwt != null && fcmToken != null) {
       try {
         final url = '${AppConfig.apiBaseUrl}/notifications';
         if (kDebugMode) print('[FCM-SYNC] POSTing to $url');
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $jwt',
-          },
-          body: jsonEncode({
-            'action': 'sync-token',
-            'fcmToken': fcmToken,
-            'deviceType': 'android'
-          }),
-        ).timeout(const Duration(seconds: 10));
-        if (kDebugMode) print('[FCM-SYNC] Response: ${response.statusCode} ${response.body}');
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $jwt',
+              },
+              body: jsonEncode({
+                'action': 'sync-token',
+                'fcmToken': fcmToken,
+                'deviceType': 'android',
+              }),
+            )
+            .timeout(const Duration(seconds: 10));
+        if (kDebugMode)
+          print('[FCM-SYNC] Response: ${response.statusCode} ${response.body}');
       } catch (e) {
         if (kDebugMode) print('[FCM-SYNC] *** ERROR syncing FCM token: $e ***');
       }
@@ -176,7 +207,9 @@ class NotificationService {
     }
   }
 
-  static Future<Map<String, dynamic>> deleteNotification(int notificationId) async {
+  static Future<Map<String, dynamic>> deleteNotification(
+    int notificationId,
+  ) async {
     final jwt = await _storage.read(key: 'jwt_token');
     if (jwt == null) return {'success': false, 'message': 'Not authenticated'};
 
@@ -206,9 +239,7 @@ class NotificationService {
     try {
       final response = await http.get(
         Uri.parse('${AppConfig.apiBaseUrl}/notifications'),
-        headers: {
-          'Authorization': 'Bearer $jwt',
-        },
+        headers: {'Authorization': 'Bearer $jwt'},
       );
 
       if (response.statusCode == 200) {
@@ -291,7 +322,7 @@ class NotificationService {
       // 2. Subscribe by school
       if (user.schoolId != null) {
         await _fcm.subscribeToTopic('school_${user.schoolId}');
-        
+
         // Teachers and School Admins might need school-level broadcast
         if (user.roleName == 'teacher' || user.roleName == 'school_admin') {
           await _fcm.subscribeToTopic('teachers_${user.schoolId}');
@@ -304,7 +335,9 @@ class NotificationService {
       }
 
       if (kDebugMode) {
-        print('[FCM-TOPIC] Subscribed for ${user.email} -> role: ${user.roleName}, school: ${user.schoolId}, classes: ${user.classIds}');
+        print(
+          '[FCM-TOPIC] Subscribed for ${user.email} -> role: ${user.roleName}, school: ${user.schoolId}, classes: ${user.classIds}',
+        );
       }
     } catch (e) {
       if (kDebugMode) print('[FCM-TOPIC] Error subscribing to topics: $e');
@@ -325,19 +358,20 @@ class NotificationService {
       for (final classId in user.classIds) {
         await _fcm.unsubscribeFromTopic('class_$classId');
       }
-      if (kDebugMode) print('[FCM-TOPIC] Unsubscribed from all topics for ${user.email}');
+      if (kDebugMode)
+        print('[FCM-TOPIC] Unsubscribed from all topics for ${user.email}');
     } catch (e) {
       if (kDebugMode) print('[FCM-TOPIC] Error unsubscribing: $e');
     }
   }
 
   static void navigateToNotifications() {
-     if (navigatorKey.currentState != null) {
+    if (navigatorKey.currentState != null) {
       navigatorKey.currentState!.pushNamed('/notifications');
     } else {
-       if (kDebugMode) {
+      if (kDebugMode) {
         print("[FCM-NAV] Error: Navigator state is null");
-       }
+      }
     }
   }
 }

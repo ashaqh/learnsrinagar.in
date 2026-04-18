@@ -113,7 +113,7 @@ class _LiveClassScreenState extends State<LiveClassScreen> {
           lc['subject_id']?.toString() == _selectedSubject;
 
       // For teachers, show all classes unless filtering by specific status
-      final matchesStatus;
+      final bool matchesStatus;
       if (isTeacher && _selectedStatus == 'all') {
         matchesStatus = true; // Show all statuses for teachers when no filter applied
       } else {
