@@ -36,17 +36,26 @@ function resolveServiceAccountPath() {
 }
 
 try {
-  if (admin.apps.length === 0) {
+  const APP_NAME = 'LEARN_SRINAGAR_ADMIN'
+  const existingApp = admin.apps.find(app => app.name === APP_NAME)
+
+  if (!existingApp) {
     const serviceAccountPath = resolveServiceAccountPath()
     const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'))
     
+    // Sanitize private key: Some environments escape newlines as \\n
+    if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
+    }
+
     firebaseApp = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    })
-    console.log('Firebase Admin initialized successfully')
+      credential: admin.credential.cert(serviceAccount),
+      projectId: serviceAccount.project_id
+    }, APP_NAME)
+    console.log(`Firebase Admin [${APP_NAME}] initialized successfully`)
   } else {
-    firebaseApp = admin.app()
-    console.log('Firebase Admin reused existing app')
+    firebaseApp = existingApp
+    console.log(`Firebase Admin [${APP_NAME}] reused existing instance`)
   }
   
   db = getFirestore(firebaseApp)
@@ -406,10 +415,17 @@ class NotificationService {
           if (result.success) return
 
           const failedTokenRow = batch[index]
-          const errorCode = result.error?.code
+          const error = result.error
           console.error(
-            `[NotificationService] Failed FCM delivery for user ${failedTokenRow.user_id}: ${errorCode ?? result.error?.message ?? 'Unknown error'}`
+            `[NotificationService] Failed FCM delivery for user ${failedTokenRow.user_id}:`,
+            {
+              code: error?.code,
+              message: error?.message,
+              stack: error?.stack
+            }
           )
+
+          const errorCode = error?.code
 
           if (
             errorCode === 'messaging/invalid-registration-token' ||
