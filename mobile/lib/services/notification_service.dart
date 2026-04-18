@@ -197,8 +197,28 @@ class NotificationService {
               }),
             )
             .timeout(const Duration(seconds: 10));
-        if (kDebugMode)
+        Map<String, dynamic>? responseData;
+        try {
+          responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        } catch (_) {
+          responseData = null;
+        }
+
+        if (kDebugMode) {
           print('[FCM-SYNC] Response: ${response.statusCode} ${response.body}');
+
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            print(
+              '[FCM-SYNC] *** BACKEND TOKEN SYNC FAILED with status ${response.statusCode} ***',
+            );
+          } else if (responseData != null && responseData['success'] != true) {
+            print(
+              '[FCM-SYNC] *** BACKEND TOKEN SYNC REJECTED: ${responseData['message']} ***',
+            );
+          } else {
+            print('[FCM-SYNC] Token sync confirmed by backend.');
+          }
+        }
       } catch (e) {
         if (kDebugMode) print('[FCM-SYNC] *** ERROR syncing FCM token: $e ***');
       }

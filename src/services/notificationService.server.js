@@ -16,6 +16,73 @@ import {
 let firebaseApp;
 let db; // Firestore instance
 const currentFileDir = path.dirname(fileURLToPath(import.meta.url))
+const firebaseRuntimeStatus = {
+  initialized: false,
+  appName: null,
+  serviceAccountPath: null,
+  projectId: null,
+  error: null,
+}
+
+function getFirebaseRuntimeStatus() {
+  return { ...firebaseRuntimeStatus }
+}
+
+function getPushDeliveryStatus(pushDelivery = {}) {
+  if (pushDelivery.error) return 'error'
+  if (pushDelivery.skipped) return 'skipped'
+  if (!pushDelivery.deliveryAttempted && pushDelivery.uniqueTokenCount === 0) return 'no_tokens'
+  if (pushDelivery.failureCount > 0 && pushDelivery.successCount > 0) return 'partial'
+  if (pushDelivery.failureCount > 0 && pushDelivery.successCount === 0) return 'failed'
+  if (pushDelivery.successCount > 0) return 'sent'
+  return 'unknown'
+}
+
+function buildPushWarning(pushDelivery = {}) {
+  if (pushDelivery.error) {
+    return `Push delivery encountered an error: ${pushDelivery.error}`
+  }
+
+  if (pushDelivery.skipped && pushDelivery.skipReason === 'firebase-admin-not-initialized') {
+    const initError = pushDelivery.firebase?.error || 'unknown initialization error'
+    return `Push delivery skipped because Firebase Admin is not initialized (${initError})`
+  }
+
+  if (pushDelivery.skipped && pushDelivery.skipReason === 'no-target-tokens') {
+    return 'Push delivery skipped because no FCM tokens were found for the targeted users'
+  }
+
+  if (pushDelivery.failureCount > 0 && pushDelivery.successCount === 0) {
+    return 'Push delivery failed for all targeted FCM tokens'
+  }
+
+  if (pushDelivery.failureCount > 0) {
+    return `Push delivery partially failed (${pushDelivery.failureCount} failed, ${pushDelivery.successCount} succeeded)`
+  }
+
+  return null
+}
+
+function createBasePushDelivery(fields = {}) {
+  return {
+    attempted: false,
+    deliveryAttempted: false,
+    skipped: false,
+    skipReason: null,
+    error: null,
+    targetUserCount: 0,
+    totalTokensInDb: 0,
+    matchedTokenCount: 0,
+    uniqueTokenCount: 0,
+    batchCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    staleTokensRemoved: 0,
+    failureSamples: [],
+    firebase: getFirebaseRuntimeStatus(),
+    ...fields,
+  }
+}
 
 function resolveServiceAccountPath() {
   const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
@@ -52,15 +119,25 @@ try {
       credential: admin.credential.cert(serviceAccount),
       projectId: serviceAccount.project_id
     }, APP_NAME)
+    firebaseRuntimeStatus.initialized = true
+    firebaseRuntimeStatus.appName = APP_NAME
+    firebaseRuntimeStatus.serviceAccountPath = serviceAccountPath
+    firebaseRuntimeStatus.projectId = serviceAccount.project_id ?? null
+    firebaseRuntimeStatus.error = null
     console.log(`Firebase Admin [${APP_NAME}] initialized successfully`)
   } else {
     firebaseApp = existingApp
+    firebaseRuntimeStatus.initialized = true
+    firebaseRuntimeStatus.appName = APP_NAME
+    firebaseRuntimeStatus.error = null
     console.log(`Firebase Admin [${APP_NAME}] reused existing instance`)
   }
   
   db = getFirestore(firebaseApp)
   console.log('Firestore initialized successfully')
 } catch (error) {
+  firebaseRuntimeStatus.initialized = false
+  firebaseRuntimeStatus.error = error.message
   console.error('Firebase Admin failed to initialize:', error.message)
 }
 
@@ -153,12 +230,28 @@ class NotificationService {
         )
       })
 
-      await this._sendPushNotifications(userIds, title, message, metadata)
+      const pushDelivery = await this._sendPushNotifications(userIds, title, message, metadata)
+      const pushDeliveryStatus = getPushDeliveryStatus(pushDelivery)
+      const warning = buildPushWarning(pushDelivery)
+
+      if (warning) {
+        console.warn(`[NotificationService] ${warning}`, {
+          notificationId,
+          title,
+          recipientCount: userIds.length,
+          pushDeliveryStatus,
+          pushDelivery,
+        })
+      }
 
       return {
         success: true,
         notificationId,
-        message: `Notification sent to ${userIds.length} users`,
+        recipientCount: userIds.length,
+        message: `Notification stored for ${userIds.length} users`,
+        pushDeliveryStatus,
+        pushDelivery,
+        warning,
       }
     } catch (error) {
       console.error('NotificationService Error:', error)
@@ -209,7 +302,18 @@ class NotificationService {
    * Internal method to send notifications to FCM topics
    */
   async _sendToTopics(topics, payload) {
-    if (!firebaseApp) return
+    if (!firebaseApp) {
+      return {
+        attempted: false,
+        skipped: true,
+        skipReason: 'firebase-admin-not-initialized',
+        topicCount: topics.length,
+        successCount: 0,
+        failureCount: 0,
+        failedTopics: [],
+        firebase: getFirebaseRuntimeStatus(),
+      }
+    }
 
     try {
       const messaging = admin.messaging(firebaseApp)
@@ -239,15 +343,47 @@ class NotificationService {
       })
 
       const results = await Promise.allSettled(promises)
+      let successCount = 0
+      let failureCount = 0
+      const failedTopics = []
+
       results.forEach((res, idx) => {
         if (res.status === 'rejected') {
+          failureCount += 1
+          failedTopics.push({
+            topic: topics[idx],
+            error: res.reason?.message || String(res.reason),
+          })
           console.error(`[NotificationService] Failed to send to topic ${topics[idx]}:`, res.reason)
         } else {
+          successCount += 1
           console.log(`[NotificationService] Successfully sent to topic ${topics[idx]}`)
         }
       })
+
+      return {
+        attempted: true,
+        skipped: false,
+        skipReason: null,
+        topicCount: topics.length,
+        successCount,
+        failureCount,
+        failedTopics,
+        firebase: getFirebaseRuntimeStatus(),
+      }
     } catch (error) {
       console.error('[NotificationService] FCM Topic Send Error:', error)
+      return {
+        attempted: true,
+        skipped: false,
+        skipReason: null,
+        topicCount: topics.length,
+        successCount: 0,
+        failureCount: topics.length,
+        failedTopics: topics.map(topic => ({ topic, error: error.message })),
+        error: error.message,
+        firebase: getFirebaseRuntimeStatus(),
+      }
     }
   }
 
@@ -277,6 +413,10 @@ class NotificationService {
         senderId
       })
 
+      if (!mysqlResult.success) {
+        return mysqlResult
+      }
+
       // 2. Store in Firestore (for real-time bell)
       await this._storeInFirestore(userIds, {
         mysqlId: mysqlResult.notificationId,
@@ -294,12 +434,25 @@ class NotificationService {
         `class_${classId}`,
         `teachers_${schoolId}`
       ]
-      await this._sendToTopics(topics, { title, message, metadata })
+      const topicDelivery = await this._sendToTopics(topics, { title, message, metadata })
+
+      if (topicDelivery?.failureCount > 0 || topicDelivery?.skipped) {
+        console.warn('[NotificationService] Homework topic delivery warning', {
+          classId,
+          schoolId,
+          topicDelivery,
+        })
+      }
 
       return {
         success: true,
         notificationId: mysqlResult.notificationId,
-        message: `Homework notification sent to topics and ${userIds.length} users`
+        recipientCount: userIds.length,
+        message: `Homework notification stored for ${userIds.length} users`,
+        pushDeliveryStatus: mysqlResult.pushDeliveryStatus,
+        pushDelivery: mysqlResult.pushDelivery,
+        topicDelivery,
+        warning: mysqlResult.warning ?? null,
       }
     } catch (error) {
       console.error('[NotificationService] sendHomeworkNotification Error:', error)
@@ -341,8 +494,13 @@ class NotificationService {
    */
   async _sendPushNotifications(userIds, title, message, data) {
     if (!firebaseApp) {
-      console.warn('[NotificationService] Firebase Admin is not initialized. Push delivery skipped.')
-      return
+      const skippedSummary = createBasePushDelivery({
+        skipped: true,
+        skipReason: 'firebase-admin-not-initialized',
+        targetUserCount: userIds.length,
+      })
+      console.warn('[NotificationService] Firebase Admin is not initialized. Push delivery skipped.', skippedSummary)
+      return skippedSummary
     }
 
     try {
@@ -352,12 +510,18 @@ class NotificationService {
       console.log(`[NotificationService] Fetching tokens for ${userIds.length} users:`, userIds.slice(0, 10), userIds.length > 10 ? '...' : '')
       const allTokens = await query('SELECT count(*) as count FROM device_tokens')
       console.log(`[NotificationService] TOTAL tokens in DB: ${allTokens[0].count}`)
+      const summary = createBasePushDelivery({
+        attempted: true,
+        targetUserCount: userIds.length,
+        totalTokensInDb: Number(allTokens[0]?.count ?? 0),
+      })
       
       const tokenRows = await query(
         `SELECT id, user_id, token FROM device_tokens WHERE user_id IN (?)`,
         [userIds]
       )
       console.log(`[NotificationService] Raw tokenRows count: ${tokenRows.length}`)
+      summary.matchedTokenCount = tokenRows.length
       if (tokenRows.length > 0) {
         console.log(`[NotificationService] First few token matches:`, tokenRows.slice(0, 3).map(r => `user:${r.user_id}`))
       }
@@ -373,6 +537,8 @@ class NotificationService {
       for (let start = 0; start < uniqueTokenRows.length; start += 500) {
         batches.push(uniqueTokenRows.slice(start, start + 500))
       }
+      summary.uniqueTokenCount = uniqueTokenRows.length
+      summary.batchCount = batches.length
 
       console.log(
         `Sending to ${uniqueTokenRows.length} FCM tokens in ${batches.length} batch(es):`,
@@ -381,11 +547,12 @@ class NotificationService {
 
       if (uniqueTokenRows.length === 0) {
         console.log('[NotificationService] No FCM tokens found for targeted users.')
-        return
+        summary.skipped = true
+        summary.skipReason = 'no-target-tokens'
+        return summary
       }
 
-      let successCount = 0
-      let failureCount = 0
+      summary.deliveryAttempted = true
 
       for (const batch of batches) {
         const response = await admin.messaging(firebaseApp).sendEachForMulticast({
@@ -408,8 +575,8 @@ class NotificationService {
           }
         })
 
-        successCount += response.successCount
-        failureCount += response.failureCount
+        summary.successCount += response.successCount
+        summary.failureCount += response.failureCount
 
         response.responses.forEach((result, index) => {
           if (result.success) return
@@ -425,6 +592,15 @@ class NotificationService {
             }
           )
 
+          if (summary.failureSamples.length < 20) {
+            summary.failureSamples.push({
+              userId: failedTokenRow.user_id,
+              tokenId: failedTokenRow.id,
+              code: error?.code || null,
+              message: error?.message || 'Unknown FCM error',
+            })
+          }
+
           const errorCode = error?.code
 
           if (
@@ -439,16 +615,25 @@ class NotificationService {
       if (invalidTokenIds.size > 0) {
         const staleTokenIds = [...invalidTokenIds]
         await query('DELETE FROM device_tokens WHERE id IN (?)', [staleTokenIds])
+        summary.staleTokensRemoved = staleTokenIds.length
         console.log(
           `[NotificationService] Removed ${staleTokenIds.length} invalid FCM token(s) from device_tokens.`
         )
       }
 
-      console.log(`FCM send successful: ${successCount} sent, ${failureCount} failed`)
+      console.log('[NotificationService] FCM multicast summary:', summary)
+      console.log(`FCM send successful: ${summary.successCount} sent, ${summary.failureCount} failed`)
+      return summary
     } catch (error) {
       console.error('FCM Send Error:', error)
+      return createBasePushDelivery({
+        attempted: true,
+        targetUserCount: userIds.length,
+        error: error.message,
+      })
     }
   }
 }
 
 export const notificationService = new NotificationService()
+export { getFirebaseRuntimeStatus }
