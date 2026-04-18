@@ -32,10 +32,11 @@ class AuthProvider with ChangeNotifier {
       if (_token != null && userData != null) {
         try {
           _user = User.fromJson(jsonDecode(userData));
-          debugPrint('[AUTH] Session loaded for user ${_user?.email}. Syncing FCM token...');
-          // Sync FCM token on startup for returning users (no login event needed)
+          debugPrint('[AUTH] Session loaded for user ${_user?.email}. Syncing FCM token and topics...');
+          // Sync FCM token and topics on startup
           await NotificationService.syncTokenWithBackend();
-          debugPrint('[AUTH] FCM token sync complete.');
+          await NotificationService.subscribeToRelevantTopics(_user!);
+          debugPrint('[AUTH] FCM sync complete.');
         } catch (e) {
           debugPrint('[AUTH] Error loading session: $e');
           _token = null;
@@ -63,10 +64,10 @@ class AuthProvider with ChangeNotifier {
       await _storage.write(key: 'jwt_token', value: _token);
       await _storage.write(key: 'user_data', value: jsonEncode(_user!.toJson()));
       
-      // Sync FCM token now that the user is authenticated 
-      // This ensures device_tokens table has the correct user_id
-      debugPrint('[AUTH] Login complete. Syncing FCM token...');
+      // Sync FCM token and topics now that the user is authenticated 
+      debugPrint('[AUTH] Login complete. Syncing FCM token and topics...');
       await NotificationService.syncTokenWithBackend();
+      await NotificationService.subscribeToRelevantTopics(_user!);
 
       _isLoading = false;
       notifyListeners();
@@ -79,6 +80,9 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> logout() async {
+    if (_user != null) {
+      await NotificationService.unsubscribeFromRelevantTopics(_user!);
+    }
     _token = null;
     _user = null;
     await _storage.delete(key: 'jwt_token');

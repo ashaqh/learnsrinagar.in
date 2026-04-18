@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config/app_config.dart';
+import '../models/user.dart';
 import '../main.dart'; // To access navigatorKey
 
 class NotificationService {
@@ -278,6 +279,56 @@ class NotificationService {
       print("[FCM-TAP] Global notification tap handled: ${message.messageId}");
     }
     navigateToNotifications();
+  }
+
+  static Future<void> subscribeToRelevantTopics(User user) async {
+    try {
+      // 1. Subscribe by global role
+      if (user.roleName == 'super_admin') {
+        await _fcm.subscribeToTopic('super_admin');
+      }
+
+      // 2. Subscribe by school
+      if (user.schoolId != null) {
+        await _fcm.subscribeToTopic('school_${user.schoolId}');
+        
+        // Teachers and School Admins might need school-level broadcast
+        if (user.roleName == 'teacher' || user.roleName == 'school_admin') {
+          await _fcm.subscribeToTopic('teachers_${user.schoolId}');
+        }
+      }
+
+      // 3. Subscribe to all class-specific topics
+      for (final classId in user.classIds) {
+        await _fcm.subscribeToTopic('class_$classId');
+      }
+
+      if (kDebugMode) {
+        print('[FCM-TOPIC] Subscribed for ${user.email} -> role: ${user.roleName}, school: ${user.schoolId}, classes: ${user.classIds}');
+      }
+    } catch (e) {
+      if (kDebugMode) print('[FCM-TOPIC] Error subscribing to topics: $e');
+    }
+  }
+
+  static Future<void> unsubscribeFromRelevantTopics(User user) async {
+    try {
+      if (user.roleName == 'super_admin') {
+        await _fcm.unsubscribeFromTopic('super_admin');
+      }
+      if (user.schoolId != null) {
+        await _fcm.unsubscribeFromTopic('school_${user.schoolId}');
+        if (user.roleName == 'teacher' || user.roleName == 'school_admin') {
+          await _fcm.unsubscribeFromTopic('teachers_${user.schoolId}');
+        }
+      }
+      for (final classId in user.classIds) {
+        await _fcm.unsubscribeFromTopic('class_$classId');
+      }
+      if (kDebugMode) print('[FCM-TOPIC] Unsubscribed from all topics for ${user.email}');
+    } catch (e) {
+      if (kDebugMode) print('[FCM-TOPIC] Error unsubscribing: $e');
+    }
   }
 
   static void navigateToNotifications() {

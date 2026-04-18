@@ -9,9 +9,11 @@ const filesToInclude = [
   'jsconfig.json',
   'server-config.js',
   'start-production.sh',
-  '.env.example',
-  'service-account.json'
+  '.env.production',
+  'service-account.json',
+  'update_db.js'
 ];
+
 
 console.log('Creating deploy.tar.gz...');
 // Use windows tar if available, or just shell out to it

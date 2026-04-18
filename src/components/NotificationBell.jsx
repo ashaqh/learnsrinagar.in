@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { Link } from '@remix-run/react';
 import { formatDistanceToNow } from 'date-fns';
+import { db } from '@/lib/firebase';
+import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
-export default function NotificationBell() {
+export default function NotificationBell({ userId }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -23,10 +25,46 @@ export default function NotificationBell() {
   };
 
   useEffect(() => {
+    if (!userId) return;
+
+    // Initial fetch from MySQL for history (optional, but good for immediate data)
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 60000); // Poll every minute
-    return () => clearInterval(interval);
-  }, []);
+
+    // Real-time listener from Firestore
+    const q = query(
+      collection(db, "notifications"),
+      where("userId", "==", Number(userId)),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const firestoreNotifications = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: data.mysqlId || doc.id,
+          title: data.title,
+          message: data.message,
+          type: data.type,
+          is_read: data.isRead,
+          created_at: data.createdAt?.toDate() || new Date(),
+          metadata: data.metadata
+        };
+      });
+
+      if (firestoreNotifications.length > 0) {
+        setNotifications(firestoreNotifications);
+        setUnreadCount(firestoreNotifications.filter(n => !n.is_read).length);
+      }
+    }, (error) => {
+      console.error('Firestore subscription error:', error);
+      // Fallback to polling if Firestore fails
+      const interval = setInterval(fetchNotifications, 60000);
+      return () => clearInterval(interval);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {

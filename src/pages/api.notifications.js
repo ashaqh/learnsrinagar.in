@@ -79,6 +79,14 @@ export async function action({ request }) {
     if (method === 'PUT' && data.action === 'mark-read') {
       const { notificationId } = data;
       await markNotificationsRead(user.id, notificationId);
+
+      try {
+        const { notificationService } = await import("@/services/notificationService.server");
+        await notificationService.markFirestoreRead(user.id, notificationId);
+      } catch (fErr) {
+        console.warn('[Notifications API] Failed to sync Firestore read status:', fErr.message);
+      }
+
       return json({ success: true, message: 'Marked as read' });
     }
 

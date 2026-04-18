@@ -296,3 +296,74 @@ export async function resolveNotificationRecipientIds(
 
   return []
 }
+
+/**
+ * Resolves all relevant users for a homework assignment event.
+ * Includes: Super Admins, School Admins, Teachers (in school), 
+ * Class Admins (in class), Students (in class), and Parents (linked to students in class).
+ */
+export async function getAllRelevantHomeworkRecipients(classId, schoolId) {
+  await ensureNotificationSchema()
+
+  const normalizedClassId = toPositiveInt(classId)
+  const normalizedSchoolId = toPositiveInt(schoolId)
+
+  if (!normalizedClassId || !normalizedSchoolId) {
+    console.warn('[NotificationSchema] Missing classId or schoolId for homework recipients resolution')
+    return []
+  }
+
+  const [
+    superAdmins,
+    schoolAdmins,
+    teachers,
+    classAdmins,
+    students,
+    parents
+  ] = await Promise.all([
+    // 1. Super Admins
+    query(`
+      SELECT u.id FROM users u 
+      JOIN roles r ON u.role_id = r.id 
+      WHERE r.name = 'super_admin'
+    `),
+    // 2. School Admins for this specific school
+    query(`
+      SELECT users_id AS id FROM schools WHERE id = ?
+    `, [normalizedSchoolId]),
+    // 3. Teachers in this school
+    query(`
+      SELECT DISTINCT ta.teacher_id AS id
+      FROM teacher_assignments ta
+      JOIN student_profiles sp ON sp.class_id = ta.class_id
+      WHERE sp.schools_id = ?
+    `, [normalizedSchoolId]),
+    // 4. Class Admins for this class
+    query(`
+      SELECT admin_id AS id FROM class_admins WHERE class_id = ?
+    `, [normalizedClassId]),
+    // 5. Students in this class
+    query(`
+      SELECT user_id AS id FROM student_profiles WHERE class_id = ?
+    `, [normalizedClassId]),
+    // 6. Parents of students in this class
+    query(`
+      SELECT DISTINCT psl.parent_id AS id
+      FROM parent_student_links psl
+      JOIN student_profiles sp ON sp.user_id = psl.student_id
+      WHERE sp.class_id = ?
+    `, [normalizedClassId])
+  ])
+
+  // Combine and deduplicate
+  const allUserIds = [
+    ...superAdmins,
+    ...schoolAdmins,
+    ...teachers,
+    ...classAdmins,
+    ...students,
+    ...parents
+  ].map(row => row.id).filter(Boolean)
+
+  return [...new Set(allUserIds)]
+}

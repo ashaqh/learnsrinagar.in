@@ -158,6 +158,9 @@ export async function action({ request }) {
       [classId, subjectId, user.id, title, description]
     )
 
+    const classInfo = await query('SELECT school_id FROM classes WHERE id = ?', [classId])
+    const schoolId = classInfo?.[0]?.school_id
+
     try {
       const message = await getHomeworkNotification({
         title,
@@ -166,18 +169,19 @@ export async function action({ request }) {
         teacherId: user.id,
       })
 
-      await notificationService.sendNotification({
-        title: "New Homework Added",
+      await notificationService.sendHomeworkNotification({
+        title: "New Homework Assigned",
         message,
-        eventType: 'HOMEWORK_ASSIGNED',
-        targetType: 'all',
+        classId: Number(classId),
+        schoolId: schoolId,
+        senderId: user.id,
         metadata: {
           homeworkId: result?.insertId ?? null,
           classId: Number(classId),
           subjectId: Number(subjectId),
           homeworkTitle: title,
-        },
-        senderId: user.id,
+          type: 'homework'
+        }
       })
     } catch (notifyError) {
       console.error('Failed to send homework notification:', notifyError)

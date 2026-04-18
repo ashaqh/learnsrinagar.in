@@ -223,7 +223,7 @@ export default function Layout() {
               </Breadcrumb>
             </div>
             <div className='flex items-center gap-4'>
-              <NotificationBell />
+              <NotificationBell userId={user.id} />
             </div>
           </div>
         </header>
