@@ -3,7 +3,18 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from './db';
 
-const JWT_SECRET = process.env.SESSION_SECRET || "s3cret";
+const JWT_SECRET = process.env.SESSION_SECRET
+
+// FP-10: Crash loudly on startup if SESSION_SECRET is missing in production.
+// A known fallback secret ("s3cret") is a critical security vulnerability.
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: SESSION_SECRET environment variable is not set. Refusing to start in production.')
+  }
+  console.warn('[Auth] WARNING: SESSION_SECRET is not set. Using insecure default — for development only.')
+}
+
+const _JWT_SECRET = JWT_SECRET || 's3cret'
 
 const sessionStorage = createCookieSessionStorage({
     cookie: {
@@ -49,12 +60,12 @@ export async function getUser(request) {
 }
 
 export function generateToken(user) {
-    return jwt.sign(user, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign(user, _JWT_SECRET, { expiresIn: '7d' });
 }
 
 export function verifyToken(token) {
     try {
-        return jwt.verify(token, JWT_SECRET);
+        return jwt.verify(token, _JWT_SECRET);
     } catch (e) {
         return null;
     }

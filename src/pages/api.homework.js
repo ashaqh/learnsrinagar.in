@@ -152,14 +152,49 @@ export async function action({ request }) {
       )
     }
 
+    // G3 — Idempotency: detect duplicate submissions within a 60-second window
+    // to prevent double-inserts if the client retries on network failure.
+    const existing = await query(
+      `SELECT id FROM homework
+       WHERE teacher_id = ? AND class_id = ? AND subject_id = ? AND title = ?
+         AND created_at >= NOW() - INTERVAL 60 SECOND
+       LIMIT 1`,
+      [user.id, classId, subjectId, title]
+    )
+
+    if (existing && existing.length > 0) {
+      console.warn(`[Homework] Duplicate submission detected for teacher ${user.id}, returning existing id: ${existing[0].id}`)
+      return json({ success: true, message: "Homework already submitted", homeworkId: existing[0].id, duplicate: true })
+    }
+
     const result = await query(
       `INSERT INTO homework (class_id, subject_id, teacher_id, title, description) 
        VALUES (?, ?, ?, ?, ?)`,
       [classId, subjectId, user.id, title, description]
     )
 
-    const classInfo = await query('SELECT school_id FROM classes WHERE id = ?', [classId])
-    const schoolId = classInfo?.[0]?.school_id
+    // FP-01 FIX: The `classes` table has no `school_id` column.
+    // Resolve school via student_profiles which holds the schools_id FK.
+    // Falls back to class_admins if no students are enrolled yet.
+    const classSchoolRows = await query(
+      `SELECT DISTINCT sp.schools_id AS school_id
+       FROM student_profiles sp
+       WHERE sp.class_id = ?
+       UNION
+       SELECT DISTINCT ca.school_id
+       FROM class_admins ca
+       WHERE ca.class_id = ?
+       LIMIT 1`,
+      [classId, classId]
+    )
+    const schoolId = classSchoolRows?.[0]?.school_id
+
+    if (!schoolId) {
+      console.error(
+        `[Homework] school_id could not be resolved for class ${classId}.` +
+        ` Notification dispatch will be skipped. Ensure at least one student or class admin is assigned to this class.`
+      )
+    }
 
     try {
       const message = await getHomeworkNotification({

@@ -58,6 +58,33 @@ const notificationSchemaStatements = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
   `INSERT IGNORE INTO notification_settings (user_id)
    SELECT id FROM users`,
+  // G1 — Add is_active column to users if not already present
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active tinyint(1) NOT NULL DEFAULT 1`,
+  // Back-fill existing rows: treat all current users as active
+  `UPDATE users SET is_active = 1 WHERE is_active IS NULL`,
+  // FP-02 — Notification dispatch audit log with retry support
+  `CREATE TABLE IF NOT EXISTS notification_dispatch_log (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    notification_id INT NULL,
+    homework_id     INT NULL,
+    class_id        INT NOT NULL,
+    school_id       INT NULL,
+    sender_id       INT NOT NULL,
+    status          ENUM('pending','success','partial','failed','dead') NOT NULL DEFAULT 'pending',
+    mysql_ok        TINYINT(1) NOT NULL DEFAULT 0,
+    firestore_ok    TINYINT(1) NOT NULL DEFAULT 0,
+    fcm_topic_ok    TINYINT(1) NOT NULL DEFAULT 0,
+    fcm_push_ok     TINYINT(1) NOT NULL DEFAULT 0,
+    recipient_count INT NOT NULL DEFAULT 0,
+    error_detail    TEXT,
+    retry_count     TINYINT NOT NULL DEFAULT 0,
+    next_retry_at   TIMESTAMP NULL,
+    created_at      TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_dispatch_status_retry (status, next_retry_at),
+    KEY idx_dispatch_homework (homework_id),
+    CONSTRAINT fk_dispatch_notification FOREIGN KEY (notification_id) REFERENCES notifications (id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
 ]
 
 export async function ensureNotificationSchema() {
@@ -299,10 +326,17 @@ export async function resolveNotificationRecipientIds(
 
 /**
  * Resolves all relevant users for a homework assignment event.
- * Includes: Super Admins, School Admins, Teachers (in school), 
+ * Includes: Super Admins, School Admins, Teachers (in school),
  * Class Admins (in class), Students (in class), and Parents (linked to students in class).
+ *
+ * G1 — Only active users (is_active = 1) are included.
+ * G2 — The sender (teacher who assigned homework) is excluded from results.
+ *
+ * @param {number} classId
+ * @param {number} schoolId
+ * @param {number|null} senderId - User ID of the teacher who triggered the event (excluded from results)
  */
-export async function getAllRelevantHomeworkRecipients(classId, schoolId) {
+export async function getAllRelevantHomeworkRecipients(classId, schoolId, senderId = null) {
   await ensureNotificationSchema()
 
   const normalizedClassId = toPositiveInt(classId)
@@ -321,41 +355,59 @@ export async function getAllRelevantHomeworkRecipients(classId, schoolId) {
     students,
     parents
   ] = await Promise.all([
-    // 1. Super Admins
+    // 1. Super Admins — active only
     query(`
-      SELECT u.id FROM users u 
-      JOIN roles r ON u.role_id = r.id 
+      SELECT u.id FROM users u
+      JOIN roles r ON u.role_id = r.id
       WHERE r.name = 'super_admin'
+        AND u.is_active = 1
     `),
-    // 2. School Admins for this specific school
+    // 2. School Admin for this specific school — active only
     query(`
-      SELECT users_id AS id FROM schools WHERE id = ?
+      SELECT u.id
+      FROM schools s
+      JOIN users u ON u.id = s.users_id
+      WHERE s.id = ?
+        AND u.is_active = 1
     `, [normalizedSchoolId]),
-    // 3. Teachers in this school
+    // 3. Teachers assigned to any class in this school — active only
     query(`
       SELECT DISTINCT ta.teacher_id AS id
       FROM teacher_assignments ta
       JOIN student_profiles sp ON sp.class_id = ta.class_id
+      JOIN users u ON u.id = ta.teacher_id
       WHERE sp.schools_id = ?
+        AND u.is_active = 1
     `, [normalizedSchoolId]),
-    // 4. Class Admins for this class
+    // 4. Class Admins for this class — active only
     query(`
-      SELECT admin_id AS id FROM class_admins WHERE class_id = ?
+      SELECT ca.admin_id AS id
+      FROM class_admins ca
+      JOIN users u ON u.id = ca.admin_id
+      WHERE ca.class_id = ?
+        AND u.is_active = 1
     `, [normalizedClassId]),
-    // 5. Students in this class
+    // 5. Students enrolled in this class — active only
     query(`
-      SELECT user_id AS id FROM student_profiles WHERE class_id = ?
+      SELECT sp.user_id AS id
+      FROM student_profiles sp
+      JOIN users u ON u.id = sp.user_id
+      WHERE sp.class_id = ?
+        AND u.is_active = 1
     `, [normalizedClassId]),
-    // 6. Parents of students in this class
+    // 6. Parents of students in this class — active only
     query(`
       SELECT DISTINCT psl.parent_id AS id
       FROM parent_student_links psl
       JOIN student_profiles sp ON sp.user_id = psl.student_id
+      JOIN users u ON u.id = psl.parent_id
       WHERE sp.class_id = ?
+        AND u.is_active = 1
     `, [normalizedClassId])
   ])
 
-  // Combine and deduplicate
+  // Combine, deduplicate, and exclude the sender (G2)
+  const normalizedSenderId = toPositiveInt(senderId)
   const allUserIds = [
     ...superAdmins,
     ...schoolAdmins,
@@ -363,7 +415,16 @@ export async function getAllRelevantHomeworkRecipients(classId, schoolId) {
     ...classAdmins,
     ...students,
     ...parents
-  ].map(row => row.id).filter(Boolean)
+  ]
+    .map(row => row.id)
+    .filter(Boolean)
 
-  return [...new Set(allUserIds)]
+  const uniqueIds = [...new Set(allUserIds)]
+
+  // G2 — Exclude the homework sender from receiving their own notification
+  if (normalizedSenderId) {
+    return uniqueIds.filter(id => id !== normalizedSenderId)
+  }
+
+  return uniqueIds
 }

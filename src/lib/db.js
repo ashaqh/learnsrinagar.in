@@ -9,9 +9,10 @@ const pool = mysql.createPool({
     password: process.env.DB_PASSWORD ?? '',
     database: process.env.DB_NAME ?? 'learnsrinagar',
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    acquireTimeout: 60000,
+    connectionLimit: 30,        // FP-07: raised from 10 — handles concurrent notification dispatches
+    queueLimit: 100,            // FP-07: reject gracefully after 100 queued (was 0 = unlimited)
+    connectTimeout: 5000,       // FP-07: fail fast on connect (5s)
+    acquireTimeout: 10000,      // FP-07: fail fast on acquire (10s, was 60s)
 });
 
 // const pool = mysql.createPool({

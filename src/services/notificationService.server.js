@@ -12,6 +12,26 @@ import {
   getAllRelevantHomeworkRecipients,
 } from '@/services/notificationSchema.server'
 
+/**
+ * G4 — Returns the subset of userIds whose notifications are NOT muted.
+ * Users without a notification_settings row are treated as unmuted (default).
+ * @param {number[]} userIds
+ * @returns {Promise<number[]>}
+ */
+async function filterMutedUsers(userIds) {
+  if (!userIds || userIds.length === 0) return []
+  const mutedRows = await query(
+    `SELECT user_id FROM notification_settings WHERE user_id IN (?) AND is_muted = 1`,
+    [userIds]
+  )
+  const mutedSet = new Set(mutedRows.map(r => r.user_id))
+  const active = userIds.filter(id => !mutedSet.has(id))
+  if (mutedSet.size > 0) {
+    console.log(`[NotificationService] Suppressed in-app delivery for ${mutedSet.size} muted user(s)`)
+  }
+  return active
+}
+
 // Initialize Firebase Admin
 let firebaseApp;
 let db; // Firestore instance
@@ -188,6 +208,12 @@ class NotificationService {
 
       console.log(`Targeting ${userIds.length} users for notification: ${title}`)
 
+      // FP-06 FIX: Precompute muted users BEFORE entering the transaction.
+      // filterMutedUsers() acquires a pool connection internally; calling it
+      // inside transaction() would require a second connection while the first
+      // is held, risking pool exhaustion under concurrent load.
+      const deliverableUserIds = await filterMutedUsers(userIds)
+
       let notificationId = null
       await transaction(async (tx) => {
         const insertResult = await tx(
@@ -218,16 +244,22 @@ class NotificationService {
 
         notificationId = insertResult.insertId
 
-        const placeholders = userIds.map(() => '(?, ?, CURRENT_TIMESTAMP)').join(', ')
-        const params = userIds.flatMap((userId) => [userId, notificationId])
+        // G4 — Only insert user_notifications for non-muted users.
+        // The master notifications row is always written for auditing purposes.
+        if (deliverableUserIds.length > 0) {
+          const placeholders = deliverableUserIds.map(() => '(?, ?, CURRENT_TIMESTAMP)').join(', ')
+          const params = deliverableUserIds.flatMap((userId) => [userId, notificationId])
 
-        await tx(
-          `
-            INSERT INTO user_notifications (user_id, notification_id, delivered_at)
-            VALUES ${placeholders}
-          `,
-          params
-        )
+          await tx(
+            `
+              INSERT INTO user_notifications (user_id, notification_id, delivered_at)
+              VALUES ${placeholders}
+            `,
+            params
+          )
+        } else {
+          console.log('[NotificationService] All recipients are muted; user_notifications skipped')
+        }
       })
 
       const pushDelivery = await this._sendPushNotifications(userIds, title, message, metadata)
@@ -391,15 +423,45 @@ class NotificationService {
    * Specialized method for homework notifications to all relevant roles
    */
   async sendHomeworkNotification({ title, message, classId, schoolId, metadata, senderId }) {
+    // FP-02: Write dispatch log row BEFORE attempting delivery — survives crashes.
+    let dispatchLogId = null
     try {
-      const userIds = await getAllRelevantHomeworkRecipients(classId, schoolId)
-      
+      const logInsert = await query(
+        `INSERT INTO notification_dispatch_log
+         (homework_id, class_id, school_id, sender_id, status, recipient_count)
+         VALUES (?, ?, ?, ?, 'pending', 0)`,
+        [metadata?.homeworkId ?? null, classId, schoolId ?? null, senderId]
+      )
+      dispatchLogId = logInsert?.insertId ?? null
+    } catch (logErr) {
+      console.warn('[NotificationService] Could not write dispatch log (non-fatal):', logErr.message)
+    }
+
+    const updateDispatchLog = async (fields) => {
+      if (!dispatchLogId) return
+      try {
+        const sets = Object.keys(fields).map(k => `${k} = ?`).join(', ')
+        await query(
+          `UPDATE notification_dispatch_log SET ${sets} WHERE id = ?`,
+          [...Object.values(fields), dispatchLogId]
+        )
+      } catch (e) {
+        console.warn('[NotificationService] Could not update dispatch log:', e.message)
+      }
+    }
+
+    try {
+      // G2 — Pass senderId so the assigning teacher is excluded from recipient list
+      const userIds = await getAllRelevantHomeworkRecipients(classId, schoolId, senderId)
+
       if (userIds.length === 0) {
         console.log('[NotificationService] No recipients found for homework notification')
+        await updateDispatchLog({ status: 'failed', error_detail: 'No recipients resolved' })
         return { success: false, message: 'No recipients found' }
       }
 
       console.log(`[NotificationService] Sending homework notification to ${userIds.length} users`)
+      await updateDispatchLog({ recipient_count: userIds.length })
 
       // 1. Store in MySQL (for persistence/history)
       const mysqlResult = await this.sendNotification({
@@ -414,35 +476,53 @@ class NotificationService {
       })
 
       if (!mysqlResult.success) {
+        await updateDispatchLog({
+          status: 'failed',
+          mysql_ok: 0,
+          error_detail: mysqlResult.message ?? 'MySQL notification write failed',
+        })
         return mysqlResult
       }
+      await updateDispatchLog({ mysql_ok: 1, notification_id: mysqlResult.notificationId })
 
       // 2. Store in Firestore (for real-time bell)
-      await this._storeInFirestore(userIds, {
-        mysqlId: mysqlResult.notificationId,
-        title,
-        message,
-        type: 'homework',
-        eventType: 'HOMEWORK_ASSIGNED',
-        metadata
-      })
+      let firestoreOk = 0
+      try {
+        await this._storeInFirestore(userIds, {
+          mysqlId: mysqlResult.notificationId,
+          title,
+          message,
+          type: 'homework',
+          eventType: 'HOMEWORK_ASSIGNED',
+          metadata
+        })
+        firestoreOk = 1
+      } catch (fsErr) {
+        console.error('[NotificationService] Firestore write failed (FP-04):', fsErr.message)
+      }
+      await updateDispatchLog({ firestore_ok: firestoreOk })
 
       // 3. Send via FCM Topics
+      // G5 — Removed 'teachers_{schoolId}' (school-wide) topic.
+      // Only target super_admin, school, and class topics to avoid notifying
+      // all school teachers on every homework event from any teacher.
       const topics = [
         'super_admin',
         `school_${schoolId}`,
         `class_${classId}`,
-        `teachers_${schoolId}`
       ]
       const topicDelivery = await this._sendToTopics(topics, { title, message, metadata })
+      const topicOk = !topicDelivery?.skipped && (topicDelivery?.failureCount ?? 0) === 0 ? 1 : 0
+      await updateDispatchLog({ fcm_topic_ok: topicOk })
 
-      if (topicDelivery?.failureCount > 0 || topicDelivery?.skipped) {
-        console.warn('[NotificationService] Homework topic delivery warning', {
-          classId,
-          schoolId,
-          topicDelivery,
-        })
+      if (!topicOk) {
+        console.warn('[NotificationService] Homework topic delivery warning', { classId, schoolId, topicDelivery })
       }
+
+      // 4. Determine overall status
+      const fcmPushOk = mysqlResult.pushDelivery?.successCount > 0 ? 1 : 0
+      const overallStatus = (firestoreOk && topicOk && fcmPushOk) ? 'success' : 'partial'
+      await updateDispatchLog({ fcm_push_ok: fcmPushOk, status: overallStatus })
 
       return {
         success: true,
@@ -456,6 +536,7 @@ class NotificationService {
       }
     } catch (error) {
       console.error('[NotificationService] sendHomeworkNotification Error:', error)
+      await updateDispatchLog({ status: 'failed', error_detail: error.message })
       return { success: false, message: error.message }
     }
   }
