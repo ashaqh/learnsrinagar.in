@@ -131,6 +131,7 @@ export async function action({ request }) {
       )
 
       // Trigger Notification
+      let notificationResult = null;
       try {
         const notificationMessage = await getLiveClassNotification({
           topic_name,
@@ -139,7 +140,7 @@ export async function action({ request }) {
           start_time: normalizedStartTime,
         });
 
-        await notificationService.sendNotification({
+        notificationResult = await notificationService.sendNotification({
           title: "New Live Class Scheduled",
           message: notificationMessage,
           eventType: 'CLASS_SCHEDULED',
@@ -148,11 +149,19 @@ export async function action({ request }) {
           audienceContext: is_all_schools ? null : { schoolId: school_id },
           metadata: { topic: topic_name, startTime: normalizedStartTime, title: title }
         });
+        if (notificationResult?.warning) {
+          console.warn('[LiveClasses API] Notification warning:', notificationResult.warning, notificationResult.pushDelivery);
+        }
       } catch (notifyError) {
         console.error('Failed to send live class notification:', notifyError);
       }
 
-      return json({ success: true, message: 'Live class created successfully' })
+      return json({
+        success: true,
+        message: 'Live class created successfully',
+        notificationStatus: notificationResult?.pushDeliveryStatus ?? null,
+        notificationWarning: notificationResult?.warning ?? null,
+      })
     }
 
     if (method === 'PUT') {

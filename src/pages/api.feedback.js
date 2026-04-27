@@ -153,43 +153,61 @@ export async function action({ request }) {
       }
 
       // Notify admins
+      let notificationResult = null;
       try {
         const { notificationService } = await import("@/services/notificationService.server");
-        await notificationService.sendNotification({
+        notificationResult = await notificationService.sendNotification({
           title: "New Parent Feedback",
           message: `${user.name} submitted feedback.`,
           eventType: 'FEEDBACK_ADDED_ADMIN',
           targetType: 'role',
           targetId: 'school_admin'
         });
+        if (notificationResult?.warning) {
+          console.warn('[Feedback API] Admin notification warning:', notificationResult.warning, notificationResult.pushDelivery);
+        }
       } catch (notifyError) {
         console.error('Failed to send feedback notification:', notifyError);
       }
 
-      return json({ success: true, message: "Feedback submitted successfully" })
+      return json({
+        success: true,
+        message: "Feedback submitted successfully",
+        notificationStatus: notificationResult?.pushDeliveryStatus ?? null,
+        notificationWarning: notificationResult?.warning ?? null,
+      })
     } else if (request.method === "PUT" && user.role_name === 'teacher') {
       await query(
         `UPDATE feedback SET response = ?, responded_at = CURRENT_TIMESTAMP WHERE id = ? AND teacher_id = ?`,
         [response, feedbackId, user.id]
       )
 
+      let notificationResult = null;
       try {
         const feedbackRows = await query('SELECT student_id FROM feedback WHERE id = ?', [feedbackId]);
         if (feedbackRows.length > 0) {
           const { notificationService } = await import("@/services/notificationService.server");
-          await notificationService.sendNotification({
+          notificationResult = await notificationService.sendNotification({
             title: "Teacher Responded to Feedback",
             message: `${user.name} has responded to your feedback.`,
             eventType: 'FEEDBACK_RESPONSE',
             targetType: 'user',
             targetId: feedbackRows[0].student_id
           });
+          if (notificationResult?.warning) {
+            console.warn('[Feedback API] Response notification warning:', notificationResult.warning, notificationResult.pushDelivery);
+          }
         }
       } catch (notifyError) {
         console.error('Failed to send feedback response notification:', notifyError);
       }
 
-      return json({ success: true, message: "Response sent successfully" })
+      return json({
+        success: true,
+        message: "Response sent successfully",
+        notificationStatus: notificationResult?.pushDeliveryStatus ?? null,
+        notificationWarning: notificationResult?.warning ?? null,
+      })
     }
 
     return json({ error: "Action not permitted" }, { status: 403 })

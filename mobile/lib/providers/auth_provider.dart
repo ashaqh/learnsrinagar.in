@@ -34,9 +34,11 @@ class AuthProvider with ChangeNotifier {
           _user = User.fromJson(jsonDecode(userData));
           debugPrint('[AUTH] Session loaded for user ${_user?.email}. Syncing FCM token and topics...');
           // Sync FCM token and topics on startup
-          await NotificationService.syncTokenWithBackend();
+          final syncResult = await NotificationService.syncTokenWithBackend(
+            source: 'session-restore',
+          );
           await NotificationService.subscribeToRelevantTopics(_user!);
-          debugPrint('[AUTH] FCM sync complete.');
+          debugPrint('[AUTH] FCM sync complete: ${syncResult['success']}');
         } catch (e) {
           debugPrint('[AUTH] Error loading session: $e');
           _token = null;
@@ -66,8 +68,11 @@ class AuthProvider with ChangeNotifier {
       
       // Sync FCM token and topics now that the user is authenticated 
       debugPrint('[AUTH] Login complete. Syncing FCM token and topics...');
-      await NotificationService.syncTokenWithBackend();
+      final syncResult = await NotificationService.syncTokenWithBackend(
+        source: 'login',
+      );
       await NotificationService.subscribeToRelevantTopics(_user!);
+      debugPrint('[AUTH] Login FCM sync result: ${syncResult['success']}');
 
       _isLoading = false;
       notifyListeners();
@@ -82,6 +87,7 @@ class AuthProvider with ChangeNotifier {
   Future<void> logout() async {
     if (_user != null) {
       await NotificationService.unsubscribeFromRelevantTopics(_user!);
+      await NotificationService.removeToken();
     }
     _token = null;
     _user = null;

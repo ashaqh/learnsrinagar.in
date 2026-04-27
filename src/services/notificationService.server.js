@@ -188,12 +188,13 @@ class NotificationService {
     targetId = null,
     audienceContext = null,
     metadata = {},
-    senderId = null
+    senderId = null,
+    userIds: overrideUserIds = null
   }) {
     try {
       await ensureNotificationSchema()
 
-      const userIds = await resolveNotificationRecipientIds(
+      const userIds = overrideUserIds ?? await resolveNotificationRecipientIds(
         targetType,
         targetId,
         audienceContext ?? {}
@@ -467,12 +468,14 @@ class NotificationService {
       const mysqlResult = await this.sendNotification({
         title,
         message,
-        type: 'system',
+        type: 'homework',
         eventType: 'HOMEWORK_ASSIGNED',
         targetType: 'class',
         targetId: classId,
+        audienceContext: { schoolId },
         metadata,
-        senderId
+        senderId,
+        userIds // Pass the already resolved list to ensure consistency
       })
 
       if (!mysqlResult.success) {

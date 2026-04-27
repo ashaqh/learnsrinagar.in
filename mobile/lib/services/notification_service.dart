@@ -14,6 +14,8 @@ class NotificationService {
   static const _storage = FlutterSecureStorage();
   static final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+  static const String _syncStateKey = 'fcm_sync_state';
+  static const String _initStateKey = 'fcm_init_state';
 
   static Future<void> initialize() async {
     // Listen for background notification tap
@@ -70,8 +72,9 @@ class NotificationService {
       badge: true,
       sound: true,
     );
-    if (kDebugMode)
+    if (kDebugMode) {
       print('FCM permission status: ${settings.authorizationStatus}');
+    }
 
     // Configure FCM to NOT auto-show heads-up (we do it ourselves via flutter_local_notifications)
     // This ensures foreground notifications also make sound/vibration
@@ -84,21 +87,24 @@ class NotificationService {
     // Get FCM Token (don't sync yet - user might not be logged in)
     String? token = await _fcm.getToken();
     if (kDebugMode) {
-      if (token != null && token.length >= 20) {
-        print('FCM Token: ${token.substring(0, 20)}...');
-      } else {
-        print('FCM Token: $token');
-      }
+      print('FCM Token: ${_tokenPreview(token)}');
     }
     await _storage.write(key: 'fcm_token', value: token);
+    await _recordInitState(
+      status: 'initialized',
+      detail:
+          'Firebase Messaging initialized with permission ${settings.authorizationStatus.name}',
+      tokenPreview: _tokenPreview(token),
+    );
 
     // Listen for token refreshes and store locally
     _fcm.onTokenRefresh.listen((newToken) async {
-      if (kDebugMode)
-        print('FCM Token refreshed: ${newToken.substring(0, 20)}...');
+      if (kDebugMode) {
+        print('FCM Token refreshed: ${_tokenPreview(newToken)}');
+      }
       await _storage.write(key: 'fcm_token', value: newToken);
       // Try to sync if user is already logged in
-      await syncTokenWithBackend();
+      await syncTokenWithBackend(source: 'token-refresh');
     });
 
     // Handle background messages
@@ -137,46 +143,55 @@ class NotificationService {
     });
 
     // Final sync attempt after initialization
-    await syncTokenWithBackend();
+    await syncTokenWithBackend(source: 'initialize');
   }
 
-  static Future<void> syncTokenWithBackend() async {
+  static Future<Map<String, dynamic>> syncTokenWithBackend({
+    bool forceRefresh = false,
+    String source = 'manual',
+  }) async {
     final jwt = await _storage.read(key: 'jwt_token');
-    var fcmToken = await _storage.read(key: 'fcm_token');
+    var fcmToken = forceRefresh ? null : await _storage.read(key: 'fcm_token');
+    final deviceType = _detectDeviceType();
 
     if (kDebugMode) {
       print(
-        '[FCM-SYNC] jwt present: ${jwt != null}, fcmToken present: ${fcmToken != null}',
+        '[FCM-SYNC] source: $source, jwt present: ${jwt != null}, fcmToken present: ${fcmToken != null}',
       );
     }
 
     // If FCM token not in storage, try to fetch it directly from Firebase
     if (fcmToken == null) {
-      if (kDebugMode)
+      if (kDebugMode) {
         print(
           '[FCM-SYNC] FCM token missing from storage, fetching from Firebase...',
         );
+      }
       try {
         fcmToken = await _fcm.getToken();
         if (fcmToken != null) {
           await _storage.write(key: 'fcm_token', value: fcmToken);
-          if (kDebugMode)
+          if (kDebugMode) {
             print(
-              '[FCM-SYNC] Fetched and stored FCM token: ${fcmToken.substring(0, 20)}...',
+              '[FCM-SYNC] Fetched and stored FCM token: ${_tokenPreview(fcmToken)}',
             );
+          }
         } else {
-          if (kDebugMode)
+          if (kDebugMode) {
             print(
               '[FCM-SYNC] Firebase returned null token. Check Google Play Services / device setup.',
             );
+          }
         }
       } catch (e) {
-        if (kDebugMode)
+        if (kDebugMode) {
           print('[FCM-SYNC] Error fetching FCM token from Firebase: $e');
+        }
       }
     } else {
-      if (kDebugMode)
-        print('[FCM-SYNC] fcmToken prefix: ${fcmToken.substring(0, 30)}...');
+      if (kDebugMode) {
+        print('[FCM-SYNC] fcmToken prefix: ${_tokenPreview(fcmToken)}');
+      }
     }
 
     if (jwt != null && fcmToken != null) {
@@ -193,7 +208,7 @@ class NotificationService {
               body: jsonEncode({
                 'action': 'sync-token',
                 'fcmToken': fcmToken,
-                'deviceType': 'android',
+                'deviceType': deviceType,
               }),
             )
             .timeout(const Duration(seconds: 10));
@@ -219,12 +234,106 @@ class NotificationService {
             print('[FCM-SYNC] Token sync confirmed by backend.');
           }
         }
+        final success =
+            response.statusCode >= 200 &&
+            response.statusCode < 300 &&
+            (responseData == null || responseData['success'] == true);
+        final result = <String, dynamic>{
+          'success': success,
+          'source': source,
+          'statusCode': response.statusCode,
+          'deviceType': deviceType,
+          'tokenPreview': _tokenPreview(fcmToken),
+          'response': responseData,
+        };
+        await _recordSyncState(
+          success ? 'success' : 'error',
+          detail: success
+              ? 'Token synced successfully'
+              : (responseData?['message']?.toString() ?? 'Backend rejected token sync'),
+          source: source,
+          deviceType: deviceType,
+          statusCode: response.statusCode,
+          jwtPresent: jwt.isNotEmpty,
+          tokenPreview: _tokenPreview(fcmToken),
+        );
+        return result;
       } catch (e) {
-        if (kDebugMode) print('[FCM-SYNC] *** ERROR syncing FCM token: $e ***');
+        if (kDebugMode) {
+          print('[FCM-SYNC] *** ERROR syncing FCM token: $e ***');
+        }
+        await _recordSyncState(
+          'error',
+          detail: e.toString(),
+          source: source,
+          deviceType: deviceType,
+          jwtPresent: jwt.isNotEmpty,
+          tokenPreview: _tokenPreview(fcmToken),
+        );
+        return {
+          'success': false,
+          'source': source,
+          'deviceType': deviceType,
+          'tokenPreview': _tokenPreview(fcmToken),
+          'error': e.toString(),
+        };
       }
     } else {
-      if (kDebugMode) print('[FCM-SYNC] Skipped: missing jwt or fcmToken');
+      if (kDebugMode) {
+        print('[FCM-SYNC] Skipped: missing jwt or fcmToken');
+      }
+      final detail = jwt == null
+          ? 'JWT missing; user is not authenticated'
+          : 'FCM token missing; Firebase did not return a token';
+      await _recordSyncState(
+        'skipped',
+        detail: detail,
+        source: source,
+        deviceType: deviceType,
+        jwtPresent: jwt != null,
+        tokenPreview: _tokenPreview(fcmToken),
+      );
+      return {
+        'success': false,
+        'skipped': true,
+        'source': source,
+        'deviceType': deviceType,
+        'tokenPreview': _tokenPreview(fcmToken),
+        'reason': detail,
+      };
     }
+  }
+
+  static Future<void> removeToken() async {
+    final jwt = await _storage.read(key: 'jwt_token');
+    final fcmToken = await _storage.read(key: 'fcm_token');
+
+    if (jwt != null && fcmToken != null) {
+      try {
+        final url = '${AppConfig.apiBaseUrl}/notifications';
+        await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $jwt',
+          },
+          body: jsonEncode({
+            'action': 'remove-token',
+            'fcmToken': fcmToken,
+          }),
+        ).timeout(const Duration(seconds: 10));
+
+        if (kDebugMode) {
+          print('[FCM] Token removed from backend');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('[FCM] Error removing token from backend: $e');
+        }
+      }
+    }
+
+    await _storage.delete(key: 'fcm_token');
   }
 
   static Future<Map<String, dynamic>> deleteNotification(
@@ -267,7 +376,9 @@ class NotificationService {
         return data['notifications'] ?? [];
       }
     } catch (e) {
-      if (kDebugMode) print('Error fetching notifications: $e');
+      if (kDebugMode) {
+        print('Error fetching notifications: $e');
+      }
     }
     return [];
   }
@@ -320,7 +431,9 @@ class NotificationService {
 
       return jsonDecode(response.body);
     } catch (e) {
-      if (kDebugMode) print('Error sending manual notification: $e');
+      if (kDebugMode) {
+        print('Error sending manual notification: $e');
+      }
       return {'success': false, 'message': e.toString()};
     }
   }
@@ -378,10 +491,13 @@ class NotificationService {
       for (final classId in user.classIds) {
         await _fcm.unsubscribeFromTopic('class_$classId');
       }
-      if (kDebugMode)
+      if (kDebugMode) {
         print('[FCM-TOPIC] Unsubscribed from all topics for ${user.email}');
+      }
     } catch (e) {
-      if (kDebugMode) print('[FCM-TOPIC] Error unsubscribing: $e');
+      if (kDebugMode) {
+        print('[FCM-TOPIC] Error unsubscribing: $e');
+      }
     }
   }
 
@@ -393,6 +509,72 @@ class NotificationService {
         print("[FCM-NAV] Error: Navigator state is null");
       }
     }
+  }
+
+  static Future<void> recordInitializationFailure(Object error) async {
+    await _recordInitState(
+      status: 'error',
+      detail: error.toString(),
+      tokenPreview: null,
+    );
+  }
+
+  static String _detectDeviceType() {
+    if (kIsWeb) return 'web';
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.android:
+        return 'android';
+      default:
+        return 'android';
+    }
+  }
+
+  static String? _tokenPreview(String? token) {
+    if (token == null || token.isEmpty) return null;
+    return token.length > 24 ? '${token.substring(0, 24)}...' : token;
+  }
+
+  static Future<void> _recordInitState({
+    required String status,
+    required String detail,
+    required String? tokenPreview,
+  }) async {
+    await _storage.write(
+      key: _initStateKey,
+      value: jsonEncode({
+        'status': status,
+        'detail': detail,
+        'tokenPreview': tokenPreview,
+        'updatedAt': DateTime.now().toIso8601String(),
+      }),
+    );
+  }
+
+  static Future<void> _recordSyncState(
+    String status, {
+    required String detail,
+    required String source,
+    required String deviceType,
+    required bool jwtPresent,
+    int? statusCode,
+    String? tokenPreview,
+  }) async {
+    await _storage.write(
+      key: _syncStateKey,
+      value: jsonEncode({
+        'status': status,
+        'detail': detail,
+        'source': source,
+        'deviceType': deviceType,
+        'jwtPresent': jwtPresent,
+        'statusCode': statusCode,
+        'tokenPreview': tokenPreview,
+        'updatedAt': DateTime.now().toIso8601String(),
+      }),
+    );
   }
 }
 

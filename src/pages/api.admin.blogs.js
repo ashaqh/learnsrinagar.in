@@ -73,21 +73,30 @@ export async function action({ request }) {
       )
 
       // Trigger Notification
+      let notificationResult = null;
       try {
         const message = await getBlogNotification(title, category_id, user.id);
 
-        await notificationService.sendNotification({
+        notificationResult = await notificationService.sendNotification({
           title: "New Blog Published!",
           message: message,
           eventType: 'BLOG_POSTED',
           targetType: 'all',
           metadata: { blogTitle: title }
         });
+        if (notificationResult?.warning) {
+          console.warn('[AdminBlogs API] Notification warning:', notificationResult.warning, notificationResult.pushDelivery);
+        }
       } catch (notifyError) {
         console.error('Failed to send blog notification:', notifyError);
       }
 
-      return json({ success: true, message: 'Blog created successfully' })
+      return json({
+        success: true,
+        message: 'Blog created successfully',
+        notificationStatus: notificationResult?.pushDeliveryStatus ?? null,
+        notificationWarning: notificationResult?.warning ?? null,
+      })
     }
 
     if (method === 'PUT') {

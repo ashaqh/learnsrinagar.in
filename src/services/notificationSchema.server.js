@@ -99,8 +99,30 @@ export async function ensureNotificationSchema() {
     })
   }
 
+
   return ensureNotificationSchemaPromise
 }
+
+/**
+ * Helper to get active Super Admin user IDs.
+ * Super Admins should usually receive all notifications.
+ */
+async function getActiveSuperAdminIds() {
+  try {
+    const rows = await query(`
+      SELECT u.id 
+      FROM users u
+      JOIN roles r ON u.role_id = r.id
+      WHERE r.name = 'super_admin' 
+        AND u.is_active = 1
+    `)
+    return rows.map(r => r.id)
+  } catch (e) {
+    console.error('[NotificationSchema] Error fetching super admins:', e.message)
+    return []
+  }
+}
+
 
 export async function getNotificationsForUser(userId, limit = 50) {
   await ensureNotificationSchema()
@@ -182,9 +204,19 @@ export async function resolveNotificationRecipientIds(
 
   const scopedSchoolId = toPositiveInt(audienceContext?.schoolId)
 
+  const superAdminIds = await getActiveSuperAdminIds()
+
   if (targetType === 'all') {
-    const rows = await query('SELECT id FROM users')
-    return rows.map((row) => row.id)
+    // If a schoolId is provided in audienceContext, limit to that school + all Super Admins
+    const rows = await query(`
+      SELECT u.id FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE u.is_active = 1
+        AND (u.school_id = ? OR r.name = 'super_admin' OR ? IS NULL)
+    `, [scopedSchoolId, scopedSchoolId])
+
+    const userIds = rows.map((row) => row.id)
+    return [...new Set([...userIds, ...superAdminIds])]
   }
 
   if (targetType === 'role') {
@@ -193,15 +225,18 @@ export async function resolveNotificationRecipientIds(
         SELECT u.id
         FROM users u
         JOIN roles r ON u.role_id = r.id
-        WHERE r.name = ?
+        WHERE r.name = ? AND u.is_active = 1
       `,
       [targetId]
     )
-    return rows.map((row) => row.id)
+    const userIds = rows.map((row) => row.id)
+    return [...new Set([...userIds, ...superAdminIds])]
   }
 
   if (targetType === 'user') {
     const userId = toPositiveInt(targetId)
+    // For single-user targeted messages, we generally don't blast all Super Admins
+    // unless they are the recipient.
     return userId ? [userId] : []
   }
 
@@ -210,11 +245,11 @@ export async function resolveNotificationRecipientIds(
     if (!schoolId) return []
 
     const [schoolAdmins, classAdmins, students, parents, teachers] = await Promise.all([
-      query('SELECT users_id AS id FROM schools WHERE id = ?', [schoolId]),
-      query('SELECT DISTINCT admin_id AS id FROM class_admins WHERE school_id = ?', [
+      query("SELECT users_id AS id FROM schools WHERE id = ? AND status = 'active'", [schoolId]),
+      query("SELECT DISTINCT admin_id AS id FROM class_admins WHERE school_id = ? AND is_active = 1", [
         schoolId,
       ]),
-      query('SELECT DISTINCT user_id AS id FROM student_profiles WHERE schools_id = ?', [
+      query("SELECT DISTINCT user_id AS id FROM student_profiles sp JOIN users u ON u.id = sp.user_id WHERE sp.schools_id = ? AND u.is_active = 1", [
         schoolId,
       ]),
       query(
@@ -222,7 +257,8 @@ export async function resolveNotificationRecipientIds(
           SELECT DISTINCT psl.parent_id AS id
           FROM parent_student_links psl
           JOIN student_profiles sp ON sp.user_id = psl.student_id
-          WHERE sp.schools_id = ?
+          JOIN users u ON u.id = psl.parent_id
+          WHERE sp.schools_id = ? AND u.is_active = 1
         `,
         [schoolId]
       ),
@@ -231,7 +267,8 @@ export async function resolveNotificationRecipientIds(
           SELECT DISTINCT ta.teacher_id AS id
           FROM teacher_assignments ta
           JOIN student_profiles sp ON sp.class_id = ta.class_id
-          WHERE sp.schools_id = ?
+          JOIN users u ON u.id = ta.teacher_id
+          WHERE sp.schools_id = ? AND u.is_active = 1
         `,
         [schoolId]
       ),
@@ -241,6 +278,7 @@ export async function resolveNotificationRecipientIds(
       ...new Set(
         [...schoolAdmins, ...classAdmins, ...students, ...parents, ...teachers]
           .map((row) => row.id)
+          .concat(superAdminIds)
           .filter(Boolean)
       ),
     ]
@@ -250,72 +288,69 @@ export async function resolveNotificationRecipientIds(
     const classId = toPositiveInt(targetId)
     if (!classId) return []
 
-    const [students, parents, teachers, classAdmins, schoolAdmins] =
-      scopedSchoolId
-        ? await Promise.all([
-            query(
-              'SELECT DISTINCT user_id AS id FROM student_profiles WHERE class_id = ? AND schools_id = ?',
-              [classId, scopedSchoolId]
-            ),
-            query(
-              `
-                SELECT DISTINCT psl.parent_id AS id
-                FROM parent_student_links psl
-                JOIN student_profiles sp ON sp.user_id = psl.student_id
-                WHERE sp.class_id = ? AND sp.schools_id = ?
-              `,
-              [classId, scopedSchoolId]
-            ),
-            query(
-              `
-                SELECT DISTINCT ta.teacher_id AS id
-                FROM teacher_assignments ta
-                JOIN student_profiles sp ON sp.class_id = ta.class_id
-                WHERE sp.class_id = ? AND sp.schools_id = ?
-              `,
-              [classId, scopedSchoolId]
-            ),
-            query(
-              'SELECT DISTINCT admin_id AS id FROM class_admins WHERE class_id = ? AND school_id = ?',
-              [classId, scopedSchoolId]
-            ),
-            query('SELECT DISTINCT users_id AS id FROM schools WHERE id = ?', [scopedSchoolId]),
-          ])
-        : await Promise.all([
-            query('SELECT DISTINCT user_id AS id FROM student_profiles WHERE class_id = ?', [
-              classId,
-            ]),
-            query(
-              `
-                SELECT DISTINCT psl.parent_id AS id
-                FROM parent_student_links psl
-                JOIN student_profiles sp ON sp.user_id = psl.student_id
-                WHERE sp.class_id = ?
-              `,
-              [classId]
-            ),
-            query(
-              'SELECT DISTINCT teacher_id AS id FROM teacher_assignments WHERE class_id = ?',
-              [classId]
-            ),
-            query('SELECT DISTINCT admin_id AS id FROM class_admins WHERE class_id = ?', [
-              classId,
-            ]),
-            query(
+    let effectiveSchoolId = scopedSchoolId
+    if (!effectiveSchoolId) {
+      const classRows = await query(
+        `SELECT school_id FROM classes WHERE id = ?
+         UNION
+         SELECT schools_id FROM student_profiles WHERE class_id = ?
+         LIMIT 1`,
+        [classId, classId]
+      )
+      // MySQL UNION might return school_id or schools_id depending on which row matched
+      effectiveSchoolId = classRows?.[0]?.school_id || classRows?.[0]?.schools_id
+    }
+
+    const [students, parents, teachers, classAdmins, resolvedSchoolAdmins] =
+      await Promise.all([
+        query(
+          'SELECT DISTINCT user_id AS id FROM student_profiles sp JOIN users u ON u.id = sp.user_id WHERE sp.class_id = ? AND u.is_active = 1',
+          [classId]
+        ),
+        query(
+          `
+            SELECT DISTINCT psl.parent_id AS id
+            FROM parent_student_links psl
+            JOIN student_profiles sp ON sp.user_id = psl.student_id
+            JOIN users u ON u.id = psl.parent_id
+            WHERE sp.class_id = ? AND u.is_active = 1
+          `,
+          [classId]
+        ),
+        query(
+          'SELECT DISTINCT teacher_id AS id FROM teacher_assignments ta JOIN users u ON u.id = ta.teacher_id WHERE ta.class_id = ? AND u.is_active = 1',
+          [classId]
+        ),
+        query('SELECT DISTINCT admin_id AS id FROM class_admins ca JOIN users u ON u.id = ca.admin_id WHERE ca.class_id = ? AND u.is_active = 1', [
+          classId,
+        ]),
+        effectiveSchoolId
+          ? query("SELECT users_id AS id FROM schools WHERE id = ? AND status = 'active'", [
+              effectiveSchoolId,
+            ])
+          : query(
               `
                 SELECT DISTINCT s.users_id AS id
                 FROM schools s
                 JOIN student_profiles sp ON sp.schools_id = s.id
-                WHERE sp.class_id = ?
+                JOIN users u ON u.id = s.users_id
+                WHERE sp.class_id = ? AND u.is_active = 1
               `,
               [classId]
             ),
-          ])
+      ])
 
     return [
       ...new Set(
-        [...students, ...parents, ...teachers, ...classAdmins, ...schoolAdmins]
+        [
+          ...students,
+          ...parents,
+          ...teachers,
+          ...classAdmins,
+          ...resolvedSchoolAdmins,
+        ]
           .map((row) => row.id)
+          .concat(superAdminIds) // Added superAdminIds here
           .filter(Boolean)
       ),
     ]
@@ -342,9 +377,13 @@ export async function getAllRelevantHomeworkRecipients(classId, schoolId, sender
   const normalizedClassId = toPositiveInt(classId)
   const normalizedSchoolId = toPositiveInt(schoolId)
 
-  if (!normalizedClassId || !normalizedSchoolId) {
-    console.warn('[NotificationSchema] Missing classId or schoolId for homework recipients resolution')
+  if (!normalizedClassId) {
+    console.warn('[NotificationSchema] Missing classId for homework recipients resolution')
     return []
+  }
+
+  if (!normalizedSchoolId) {
+    console.debug('[NotificationSchema] No schoolId provided for homework resolution. Recipients will be limited to class and global scopes.')
   }
 
   const [
@@ -370,15 +409,17 @@ export async function getAllRelevantHomeworkRecipients(classId, schoolId, sender
       WHERE s.id = ?
         AND u.is_active = 1
     `, [normalizedSchoolId]),
-    // 3. Teachers assigned to any class in this school — active only
+    // 3. Teachers assigned to this specific school — active only
+    // Robust resolution: Join via classes table if student_profiles is empty
     query(`
       SELECT DISTINCT ta.teacher_id AS id
       FROM teacher_assignments ta
-      JOIN student_profiles sp ON sp.class_id = ta.class_id
+      LEFT JOIN student_profiles sp ON sp.class_id = ta.class_id
+      LEFT JOIN classes c ON c.id = ta.class_id
       JOIN users u ON u.id = ta.teacher_id
-      WHERE sp.schools_id = ?
+      WHERE (sp.schools_id = ? OR c.school_id = ?)
         AND u.is_active = 1
-    `, [normalizedSchoolId]),
+    `, [normalizedSchoolId, normalizedSchoolId]),
     // 4. Class Admins for this class — active only
     query(`
       SELECT ca.admin_id AS id

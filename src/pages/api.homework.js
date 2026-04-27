@@ -173,29 +173,47 @@ export async function action({ request }) {
       [classId, subjectId, user.id, title, description]
     )
 
-    // FP-01 FIX: The `classes` table has no `school_id` column.
-    // Resolve school via student_profiles which holds the schools_id FK.
-    // Falls back to class_admins if no students are enrolled yet.
-    const classSchoolRows = await query(
-      `SELECT DISTINCT sp.schools_id AS school_id
-       FROM student_profiles sp
-       WHERE sp.class_id = ?
-       UNION
-       SELECT DISTINCT ca.school_id
-       FROM class_admins ca
-       WHERE ca.class_id = ?
-       LIMIT 1`,
-      [classId, classId]
-    )
-    const schoolId = classSchoolRows?.[0]?.school_id
+    // Attempt to resolve school via direct column, student profiles, or class admins.
+    let schoolId = null;
+    try {
+      const classSchoolRows = await query(
+        `SELECT school_id FROM classes WHERE id = ?
+         UNION
+         SELECT DISTINCT schools_id FROM student_profiles WHERE class_id = ?
+         UNION
+         SELECT DISTINCT school_id FROM class_admins WHERE class_id = ?
+         LIMIT 1`,
+        [classId, classId, classId]
+      )
+      // MySQL UNION might return school_id or schools_id depending on which row matched
+      schoolId = classSchoolRows?.[0]?.school_id || classSchoolRows?.[0]?.schools_id
+    } catch (err) {
+      // Fallback for older schemas where classes table might not have school_id column
+      const fallbackRows = await query(
+        `SELECT DISTINCT schools_id FROM student_profiles WHERE class_id = ?
+         UNION
+         SELECT DISTINCT school_id FROM class_admins WHERE class_id = ?
+         LIMIT 1`,
+        [classId, classId]
+      )
+      schoolId = fallbackRows?.[0]?.schools_id || fallbackRows?.[0]?.school_id
+    }
 
-    if (!schoolId) {
-      console.error(
-        `[Homework] school_id could not be resolved for class ${classId}.` +
-        ` Notification dispatch will be skipped. Ensure at least one student or class admin is assigned to this class.`
+    // Final fallback: use teacher's primary school if still null
+    if (!schoolId && user.school_id) {
+       schoolId = user.school_id;
+    }
+
+    if (schoolId) {
+      schoolId = Number(schoolId);
+    } else {
+      console.warn(
+        `[Homework] school_id could not be resolved for class ${classId}. ` +
+        `Notifications will be sent to class scope only.`
       )
     }
 
+    let notificationResult = null
     try {
       const message = await getHomeworkNotification({
         title,
@@ -204,7 +222,7 @@ export async function action({ request }) {
         teacherId: user.id,
       })
 
-      await notificationService.sendHomeworkNotification({
+      notificationResult = await notificationService.sendHomeworkNotification({
         title: "New Homework Assigned",
         message,
         classId: Number(classId),
@@ -218,11 +236,19 @@ export async function action({ request }) {
           type: 'homework'
         }
       })
+      if (notificationResult?.warning) {
+        console.warn('[Homework API] Notification warning:', notificationResult.warning, notificationResult.pushDelivery)
+      }
     } catch (notifyError) {
       console.error('Failed to send homework notification:', notifyError)
     }
 
-    return json({ success: true, message: "Homework created successfully" })
+    return json({
+      success: true,
+      message: "Homework created successfully",
+      notificationStatus: notificationResult?.pushDeliveryStatus ?? null,
+      notificationWarning: notificationResult?.warning ?? null,
+    })
   } catch (error) {
     return json({ error: "Internal server error" }, { status: 500 })
   }

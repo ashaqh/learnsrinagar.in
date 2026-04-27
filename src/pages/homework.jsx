@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { query } from '@/lib/db'
 import { getUser } from '@/lib/auth'
+import { notificationService } from "@/services/notificationService.server"
+import { getHomeworkNotification } from "@/services/notificationHelper.server"
 import {
   useLoaderData,
   useSubmit,
@@ -185,11 +187,51 @@ export async function action({ request }) {
         }
       }
 
-      await query(
+      const insertResult = await query(
         `INSERT INTO homework (title, description, subject_id, class_id, teacher_id)
          VALUES (?, ?, ?, ?, ?)`,
         [title, description, subjectId, classId, teacher_id]
       )
+
+      const homeworkId = insertResult.insertId
+
+      // Notification logic (consistent with mobile API)
+      try {
+        const schoolRows = await query(
+          `SELECT schools_id FROM student_profiles WHERE class_id = ? LIMIT 1`,
+          [classId]
+        )
+        const schoolId = schoolRows[0]?.schools_id || null
+
+        // Fetch subject name for the notification message
+        const [subjectRow] = await query(
+          `SELECT name FROM subjects WHERE id = ?`,
+          [subjectId]
+        )
+        const subjectName = subjectRow?.name || 'Subject'
+
+        const { title: notifTitle, message: notifMessage } = getHomeworkNotification(
+          title,
+          subjectName
+        )
+
+        await notificationService.sendHomeworkNotification({
+          title: notifTitle,
+          message: notifMessage,
+          classId: classId,
+          schoolId: schoolId,
+          metadata: {
+            homeworkId: homeworkId,
+            classId: classId,
+            subjectId: subjectId,
+            subjectName: subjectName,
+          },
+          senderId: teacher_id,
+        })
+      } catch (notifError) {
+        console.error('[HomeworkAction] Failed to send notification:', notifError)
+        // We don't fail the whole action if notifications fail
+      }
 
       return { success: true, message: 'Homework created successfully' }
     }

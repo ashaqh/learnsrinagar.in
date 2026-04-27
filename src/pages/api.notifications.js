@@ -7,6 +7,16 @@ import {
   markNotificationsRead,
 } from "@/services/notificationSchema.server";
 
+function normalizeDeviceType(rawDeviceType) {
+  if (rawDeviceType === 'ios' || rawDeviceType === 'web') return rawDeviceType;
+  return 'android';
+}
+
+function toTokenPreview(token) {
+  if (typeof token !== 'string' || token.length === 0) return null;
+  return token.length > 24 ? `${token.slice(0, 24)}...` : token;
+}
+
 async function authorize(request) {
   const authHeader = request.headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -60,10 +70,14 @@ export async function action({ request }) {
     if (method === 'POST' && data.action === 'sync-token') {
       await ensureNotificationSchema();
 
-      const { fcmToken, deviceType = 'android' } = data;
+      const fcmToken = typeof data.fcmToken === 'string' ? data.fcmToken.trim() : '';
+      const deviceType = normalizeDeviceType(data.deviceType);
       if (!fcmToken) return json({ success: false, message: 'Token required' }, { status: 400 });
+      if (fcmToken.length < 20) {
+        return json({ success: false, message: 'Malformed FCM token' }, { status: 400 });
+      }
 
-      console.log(`[FCM] sync-token for user ${user.id}, token: ${fcmToken.substring(0, 20)}...`);
+      console.log(`[FCM] sync-token for user ${user.id}, deviceType: ${deviceType}, token: ${toTokenPreview(fcmToken)}`);
       
       const syncResult = await query(
         `INSERT INTO device_tokens (user_id, token, device_type) 
@@ -71,8 +85,48 @@ export async function action({ request }) {
          ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), device_type = VALUES(device_type), last_updated = CURRENT_TIMESTAMP`,
         [user.id, fcmToken, deviceType]
       );
-      console.log(`[FCM] token saved for user ${user.id}, affectedRows: ${syncResult.affectedRows}`);
-      return json({ success: true, message: 'Token synced' });
+      const tokenRows = await query(
+        `SELECT id, user_id, device_type, last_updated
+         FROM device_tokens
+         WHERE token = ?
+         LIMIT 1`,
+        [fcmToken]
+      );
+      const userTokenCountRows = await query(
+        'SELECT COUNT(*) AS count FROM device_tokens WHERE user_id = ?',
+        [user.id]
+      );
+      const savedTokenRow = tokenRows[0] ?? null;
+
+      console.log(`[FCM] token saved for user ${user.id}, affectedRows: ${syncResult.affectedRows}, tokenCountForUser: ${Number(userTokenCountRows[0]?.count ?? 0)}`);
+      return json({
+        success: true,
+        message: 'Token synced',
+        sync: {
+          tokenId: savedTokenRow?.id ?? null,
+          userId: savedTokenRow?.user_id ?? user.id,
+          deviceType: savedTokenRow?.device_type ?? deviceType,
+          tokenPreview: toTokenPreview(fcmToken),
+          tokenCountForUser: Number(userTokenCountRows[0]?.count ?? 0),
+          lastUpdated: savedTokenRow?.last_updated ?? null,
+        },
+      });
+    }
+
+    // 1.5 Remove FCM Token
+    if (method === 'POST' && data.action === 'remove-token') {
+      await ensureNotificationSchema();
+      const { fcmToken } = data;
+      if (!fcmToken) return json({ success: false, message: 'Token required' }, { status: 400 });
+
+      console.log(`[FCM] remove-token for user ${user.id}, token: ${toTokenPreview(fcmToken)}`);
+      const removeResult = await query('DELETE FROM device_tokens WHERE token = ? AND user_id = ?', [fcmToken, user.id]);
+      return json({
+        success: true,
+        message: 'Token removed',
+        removedCount: Number(removeResult?.affectedRows ?? 0),
+        tokenPreview: toTokenPreview(fcmToken),
+      });
     }
 
     // 2. Mark as Read
